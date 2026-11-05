@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QSize, Qt, QThread, Signal
+from PySide6.QtCore import QSize, Qt, QThread, QTimer, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
@@ -539,11 +539,6 @@ class SettingsPage(QWidget):
     def _show_update_dialog(self, info: UpdateInfo) -> None:
         dlg = UpdateDialog(info, self._palette, self.window())
         dlg.exec()
-        worker.failed.connect(thread.quit)
-        thread.finished.connect(cleanup)
-
-        self._check_update_thread = thread
-        thread.start()
 
     def _run_manual_scan(self) -> None:
         self.scan_now_btn.setEnabled(False)
