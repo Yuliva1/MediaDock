@@ -60,6 +60,10 @@ class LibraryPage(QWidget):
         self._palette = palette or get_theme()
         self._favorites_only = favorites_only
         self._view_mode = "grid"
+        self._page_size = 48
+        self._current_page = 1
+        self._total_pages = 1
+        self._total_items = 0
 
         self._build_ui()
         self.refresh()
@@ -209,6 +213,33 @@ class LibraryPage(QWidget):
         self.stack.addWidget(self.list_scroll)
         root.addWidget(self.stack, 1)
 
+        self.pagination_bar = QFrame()
+        self.pagination_bar.setObjectName("SubtlePanel")
+        self.pagination_bar.hide()
+        pg_lay = QHBoxLayout(self.pagination_bar)
+        pg_lay.setContentsMargins(14, 8, 14, 8)
+        pg_lay.setSpacing(12)
+
+        self.prev_page_btn = QPushButton("← Önceki Sayfa")
+        self.prev_page_btn.setObjectName("SecondaryButton")
+        self.prev_page_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.prev_page_btn.clicked.connect(self._on_prev_page)
+
+        self.page_info_lbl = QLabel("Sayfa 1 / 1")
+        self.page_info_lbl.setObjectName("MutedText")
+
+        self.next_page_btn = QPushButton("Sonraki Sayfa →")
+        self.next_page_btn.setObjectName("SecondaryButton")
+        self.next_page_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.next_page_btn.clicked.connect(self._on_next_page)
+
+        pg_lay.addWidget(self.prev_page_btn)
+        pg_lay.addStretch()
+        pg_lay.addWidget(self.page_info_lbl)
+        pg_lay.addStretch()
+        pg_lay.addWidget(self.next_page_btn)
+        root.addWidget(self.pagination_bar)
+
     def _set_view_mode(self, mode: str) -> None:
         if self._view_mode == mode:
             return
@@ -245,27 +276,65 @@ class LibraryPage(QWidget):
             if li and li.widget():
                 li.widget().deleteLater()
 
-    def refresh(self, reload_platforms: bool = True) -> None:
+    def _on_prev_page(self) -> None:
+        if self._current_page > 1:
+            self._current_page -= 1
+            self.refresh(reload_platforms=False, reset_page=False)
+
+    def _on_next_page(self) -> None:
+        if self._current_page < self._total_pages:
+            self._current_page += 1
+            self.refresh(reload_platforms=False, reset_page=False)
+
+    def refresh(self, reload_platforms: bool = True, reset_page: bool = True) -> None:
         if reload_platforms:
             self._reload_platform_choices()
+
+        if reset_page:
+            self._current_page = 1
 
         search_txt = self.search_input.text().strip()
         platform_val = self.platform_combo.currentText()
         sort_code = str(self.sort_combo.currentData() or "date_desc")
 
+        total_count = self._db.get_media_items_count(
+            search=search_txt,
+            platform=platform_val,
+            favorites_only=self._favorites_only,
+        )
+        self._total_items = total_count
+        self._total_pages = max(1, (total_count + self._page_size - 1) // self._page_size)
+
+        if self._current_page > self._total_pages:
+            self._current_page = self._total_pages
+        if self._current_page < 1:
+            self._current_page = 1
+
+        offset = (self._current_page - 1) * self._page_size
         items = self._db.get_media_items(
             search=search_txt,
             platform=platform_val,
             favorites_only=self._favorites_only,
             sort_by=sort_code,
+            limit=self._page_size,
+            offset=offset,
         )
 
-        self.count_lbl.setText(f"{len(items)} medya")
+        self.count_lbl.setText(f"{total_count} medya")
         self._clear_containers()
 
         if not items:
+            self.pagination_bar.hide()
             self.stack.setCurrentIndex(0)
             return
+
+        if self._total_pages > 1:
+            self.prev_page_btn.setEnabled(self._current_page > 1)
+            self.next_page_btn.setEnabled(self._current_page < self._total_pages)
+            self.page_info_lbl.setText(f"Sayfa {self._current_page} / {self._total_pages}   ·   Toplam {self._total_items} medya")
+            self.pagination_bar.show()
+        else:
+            self.pagination_bar.hide()
 
         if self._view_mode == "grid":
             for it in items:
@@ -312,7 +381,7 @@ class LibraryPage(QWidget):
         new_state = self._db.toggle_favorite(media_id)
         msg = "Favorilere eklendi." if new_state else "Favorilerden çıkarıldı."
         self.toast_requested.emit(msg, "info")
-        self.refresh(reload_platforms=False)
+        self.refresh(reload_platforms=False, reset_page=False)
         self.library_changed.emit()
 
     def _handle_delete(self, media_id: int) -> None:
@@ -336,7 +405,7 @@ class LibraryPage(QWidget):
             "Dosya ve kütüphane kaydı silindi." if dlg.delete_from_disk else "Kütüphaneden kaldırıldı.",
             "info",
         )
-        self.refresh(reload_platforms=True)
+        self.refresh(reload_platforms=True, reset_page=False)
         self.library_changed.emit()
 
     def set_palette_theme(self, palette: ThemePalette) -> None:

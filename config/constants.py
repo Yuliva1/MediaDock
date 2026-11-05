@@ -2,7 +2,7 @@ from __future__ import annotations
 
 APP_NAME = "MediaDock"
 APP_SUBTITLE = "Universal Media Downloader"
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.2"
 APP_ORGANIZATION = "Yuliva"
 APP_AUTHOR = "Yuliva"
 DEFAULT_UPDATE_REPO = "Yuliva1/MediaDock"

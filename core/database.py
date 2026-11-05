@@ -201,6 +201,8 @@ class DatabaseManager:
         platform: str = "",
         favorites_only: bool = False,
         sort_by: str = "date_desc",
+        limit: int | None = None,
+        offset: int = 0,
     ) -> list[dict[str, Any]]:
         clauses: list[str] = []
         params: list[Any] = []
@@ -228,13 +230,41 @@ class DatabaseManager:
             "size_asc": "file_size ASC",
         }
         order_sql = sort_map.get(sort_by, "downloaded_at DESC, id DESC")
+        limit_sql = f" LIMIT {int(limit)} OFFSET {int(offset)}" if limit is not None else ""
 
         with self._lock:
             cur = self._conn.execute(
-                f"SELECT * FROM media_items {where_sql} ORDER BY {order_sql}",
+                f"SELECT * FROM media_items {where_sql} ORDER BY {order_sql}{limit_sql}",
                 params,
             )
             return [dict(row) for row in cur.fetchall()]
+
+    def get_media_items_count(
+        self,
+        *,
+        search: str = "",
+        platform: str = "",
+        favorites_only: bool = False,
+    ) -> int:
+        clauses: list[str] = []
+        params: list[Any] = []
+
+        if favorites_only:
+            clauses.append("is_favorite = 1")
+
+        if platform and platform != "Tüm Platformlar":
+            clauses.append("platform = ?")
+            params.append(platform)
+
+        if search.strip():
+            q = f"%{search.strip()}%"
+            clauses.append("(title LIKE ? OR file_name LIKE ? OR uploader LIKE ? OR platform LIKE ?)")
+            params.extend([q, q, q, q])
+
+        where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        with self._lock:
+            row = self._conn.execute(f"SELECT COUNT(*) AS c FROM media_items {where_sql}", params).fetchone()
+            return int(row["c"]) if row else 0
 
     def get_media_by_id(self, media_id: int) -> dict[str, Any] | None:
         with self._lock:

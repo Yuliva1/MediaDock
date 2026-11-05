@@ -511,8 +511,7 @@ class SettingsPage(QWidget):
             self.check_app_update_btn.setEnabled(True)
             self.check_app_update_btn.setText("Güncellemeleri Denetle")
             if info.has_update:
-                dlg = UpdateDialog(info, self._palette, self.window())
-                dlg.exec()
+                QTimer.singleShot(150, lambda: self._show_update_dialog(info))
             else:
                 self.toast_requested.emit(
                     f"MediaDock güncel (v{info.current_version}). En yeni sürümü kullanıyorsunuz.",
@@ -533,6 +532,13 @@ class SettingsPage(QWidget):
         worker.finished.connect(on_checked)
         worker.failed.connect(on_failed)
         worker.finished.connect(thread.quit)
+        worker.failed.connect(thread.quit)
+        thread.finished.connect(cleanup)
+        thread.start()
+
+    def _show_update_dialog(self, info: UpdateInfo) -> None:
+        dlg = UpdateDialog(info, self._palette, self.window())
+        dlg.exec()
         worker.failed.connect(thread.quit)
         thread.finished.connect(cleanup)
 

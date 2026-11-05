@@ -189,7 +189,8 @@ class UpdateDialog(QDialog):
             return
 
         self.err_lbl.hide()
-        self.later_btn.setEnabled(False)
+        self.later_btn.setEnabled(True)
+        self.later_btn.setText("İptal Et")
         self.update_btn.setEnabled(False)
         self.update_btn.setText("İndiriliyor...")
         self.progress_panel.show()
@@ -202,6 +203,8 @@ class UpdateDialog(QDialog):
         worker.progress.connect(self._on_progress)
         worker.finished.connect(self._on_finished)
         worker.failed.connect(self._on_failed)
+        worker.finished.connect(thread.quit)
+        worker.failed.connect(thread.quit)
 
         def cleanup() -> None:
             worker.deleteLater()
@@ -215,39 +218,47 @@ class UpdateDialog(QDialog):
         thread.start()
 
     def _on_progress(self, pct: float, dl_bytes: int, tot_bytes: int, speed: float) -> None:
-        self.progress_bar.set_target_value(pct)
+        self.progress_bar.set_value(pct)
         self.prog_pct_lbl.setText(f"%{pct:.0f}")
         speed_txt = f"{format_bytes(speed)}/s" if speed > 0 else ""
         size_txt = f"{format_bytes(dl_bytes)} / {format_bytes(tot_bytes)}" if tot_bytes > 0 else format_bytes(dl_bytes)
         self.speed_lbl.setText(f"{size_txt}   ·   {speed_txt}")
 
     def _on_finished(self, downloaded_path: str) -> None:
+        self._cleanup_worker_thread()
         self._downloaded_path = downloaded_path
         self.prog_status_lbl.setText("İndirme tamamlandı! Kurulum başlatılıyor...")
         self.prog_pct_lbl.setText("%100")
-        self.progress_bar.set_target_value(100.0)
+        self.progress_bar.set_value(100.0)
         self.update_btn.setText("Kuruluma Başla")
         self.update_btn.setEnabled(True)
         self.later_btn.setEnabled(True)
+        self.later_btn.setText("Kapat")
 
         from PySide6.QtCore import QTimer
         QTimer.singleShot(600, lambda: launch_installer_and_exit(downloaded_path))
 
     def _on_failed(self, error_message: str) -> None:
+        self._cleanup_worker_thread()
         self.progress_panel.hide()
         self.later_btn.setEnabled(True)
+        self.later_btn.setText("Daha Sonra")
         self.update_btn.setEnabled(True)
         self.update_btn.setText("Tekrar Dene")
         self.err_lbl.setText(f"İndirme hatası: {error_message}")
         self.err_lbl.show()
 
-    def _on_later_clicked(self) -> None:
+    def _cleanup_worker_thread(self) -> None:
         if self._worker:
             self._worker.cancel()
         if self._thread and self._thread.isRunning():
             self._thread.quit()
+            self._thread.wait(1200)
+
+    def _on_later_clicked(self) -> None:
+        self._cleanup_worker_thread()
         self.reject()
 
     def closeEvent(self, event) -> None:
-        self._on_later_clicked()
+        self._cleanup_worker_thread()
         super().closeEvent(event)

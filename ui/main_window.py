@@ -212,8 +212,7 @@ class MainWindow(QMainWindow):
         def on_checked(info: UpdateInfo) -> None:
             if info.has_update:
                 self.show_toast(f"Yeni MediaDock sürümü mevcut: v{info.latest_version}", "info")
-                dlg = UpdateDialog(info, self.palette, self)
-                dlg.exec()
+                QTimer.singleShot(250, lambda: self._show_update_dialog(info))
 
         def cleanup() -> None:
             worker.deleteLater()
@@ -225,6 +224,10 @@ class MainWindow(QMainWindow):
         worker.failed.connect(thread.quit)
         thread.finished.connect(cleanup)
         thread.start()
+
+    def _show_update_dialog(self, info: UpdateInfo) -> None:
+        dlg = UpdateDialog(info, self.palette, self)
+        dlg.exec()
 
     def _run_dependency_check(self) -> None:
         status = self.ffmpeg_mgr.check_dependencies()
