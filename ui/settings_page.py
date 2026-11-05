@@ -500,45 +500,29 @@ class SettingsPage(QWidget):
     def _check_app_updates(self) -> None:
         self.check_app_update_btn.setEnabled(False)
         self.check_app_update_btn.setText("Denetleniyor...")
+        from PySide6.QtWidgets import QApplication
 
-        repo = "Yuliva1/MediaDock"
+        app = QApplication.instance()
+        if app:
+            app.processEvents()
 
-        thread = QThread(self)
-        worker = UpdateCheckWorker(repo, APP_VERSION)
-        worker.moveToThread(thread)
+        try:
+            from core.updater import check_for_updates
 
-        def on_checked(info: UpdateInfo) -> None:
-            self.check_app_update_btn.setEnabled(True)
-            self.check_app_update_btn.setText("Güncellemeleri Denetle")
+            info = check_for_updates("Yuliva1/MediaDock", APP_VERSION)
             if info.has_update:
-                QTimer.singleShot(150, lambda: self._show_update_dialog(info))
+                dlg = UpdateDialog(info, self._palette, self.window())
+                dlg.exec()
             else:
                 self.toast_requested.emit(
                     f"MediaDock güncel (v{info.current_version}). En yeni sürümü kullanıyorsunuz.",
                     "info",
                 )
-
-        def on_failed(err_msg: str) -> None:
+        except Exception as exc:
+            self.toast_requested.emit(f"Güncelleme denetimi başarısız: {exc}", "error")
+        finally:
             self.check_app_update_btn.setEnabled(True)
             self.check_app_update_btn.setText("Güncellemeleri Denetle")
-            self.toast_requested.emit(f"Güncelleme denetimi başarısız: {err_msg[:60]}", "error")
-
-        def cleanup() -> None:
-            worker.deleteLater()
-            thread.deleteLater()
-            self._check_update_thread = None
-
-        thread.started.connect(worker.run)
-        worker.finished.connect(on_checked)
-        worker.failed.connect(on_failed)
-        worker.finished.connect(thread.quit)
-        worker.failed.connect(thread.quit)
-        thread.finished.connect(cleanup)
-        thread.start()
-
-    def _show_update_dialog(self, info: UpdateInfo) -> None:
-        dlg = UpdateDialog(info, self._palette, self.window())
-        dlg.exec()
 
     def _run_manual_scan(self) -> None:
         self.scan_now_btn.setEnabled(False)
