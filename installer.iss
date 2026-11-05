@@ -1,5 +1,5 @@
 #define AppName "MediaDock"
-#define AppVersion "1.0.3"
+#define AppVersion "1.0.4"
 #define AppExe "MediaDock.exe"
 
 [Setup]
