@@ -56,6 +56,14 @@ def check_for_updates(repo_or_url: str, current_version: str = APP_VERSION) -> U
         url = f"https://api.github.com/repos/{clean_slug}/releases/latest"
 
     resp = requests.get(url, headers=headers, timeout=10)
+    if resp.status_code == 404:
+        return UpdateInfo(
+            current_version=current_version,
+            latest_version=current_version,
+            has_update=False,
+            release_name=f"MediaDock v{current_version}",
+            release_notes="Henüz GitHub üzerinde yeni bir sürüm yayınlanmadı.",
+        )
     resp.raise_for_status()
     data: dict[str, Any] = resp.json()
 
