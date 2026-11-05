@@ -4,7 +4,7 @@ import os
 
 from pathlib import Path
 
-from PySide6.QtCore import QSize, Qt, QThread, QTimer, Signal
+from PySide6.QtCore import QSize, Qt, QThread, Signal
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QComboBox,
@@ -535,6 +535,8 @@ class SettingsPage(QWidget):
         self.toast_requested.emit("Hata raporu panoya kopyalandı. Destek için yapıştırabilirsiniz.", "success")
 
     def _check_app_updates(self) -> None:
+        if self._check_update_thread is not None:
+            return
         self.check_app_update_btn.setEnabled(False)
         self.check_app_update_btn.setText("Denetleniyor...")
 
@@ -543,35 +545,44 @@ class SettingsPage(QWidget):
         thread = QThread(self)
         worker = UpdateCheckWorker(repo, APP_VERSION)
         worker.moveToThread(thread)
+        self._check_update_thread = thread
+        self._check_update_worker = worker
 
-        def on_checked(info: UpdateInfo) -> None:
-            self.check_app_update_btn.setEnabled(True)
-            self.check_app_update_btn.setText("Güncellemeleri Denetle")
-            if info.has_update:
-                QTimer.singleShot(150, lambda: self._show_update_dialog(info))
-            else:
-                self.toast_requested.emit(
-                    f"MediaDock güncel (v{info.current_version}). En yeni sürümü kullanıyorsunuz.",
-                    "info",
-                )
-
-        def on_failed(err_msg: str) -> None:
-            self.check_app_update_btn.setEnabled(True)
-            self.check_app_update_btn.setText("Güncellemeleri Denetle")
-            self.toast_requested.emit(f"Güncelleme denetimi başarısız: {err_msg[:60]}", "error")
-
-        def cleanup() -> None:
-            worker.deleteLater()
-            thread.deleteLater()
-            self._check_update_thread = None
-
+        # Sinyaller QObject yöntemlerine bağlanır (kapanış fonksiyonuna değil): böylece
+        # çağrı otomatik olarak ana (arayüz) iş parçacığında çalışır ve pencere açılabilir.
         thread.started.connect(worker.run)
-        worker.finished.connect(on_checked)
-        worker.failed.connect(on_failed)
+        worker.finished.connect(self._on_app_update_checked)
+        worker.failed.connect(self._on_app_update_failed)
         worker.finished.connect(thread.quit)
         worker.failed.connect(thread.quit)
-        thread.finished.connect(cleanup)
+        thread.finished.connect(self._cleanup_update_check)
         thread.start()
+
+    def _on_app_update_checked(self, info: UpdateInfo) -> None:
+        self.check_app_update_btn.setEnabled(True)
+        self.check_app_update_btn.setText("Güncellemeleri Denetle")
+        if info.has_update:
+            self._show_update_dialog(info)
+        else:
+            self.toast_requested.emit(
+                f"MediaDock güncel (v{info.current_version}). En yeni sürümü kullanıyorsunuz.",
+                "info",
+            )
+
+    def _on_app_update_failed(self, err_msg: str) -> None:
+        self.check_app_update_btn.setEnabled(True)
+        self.check_app_update_btn.setText("Güncellemeleri Denetle")
+        self.toast_requested.emit(f"Güncelleme denetimi başarısız: {err_msg[:60]}", "error")
+
+    def _cleanup_update_check(self) -> None:
+        worker = getattr(self, "_check_update_worker", None)
+        thread = self._check_update_thread
+        self._check_update_worker = None
+        self._check_update_thread = None
+        if worker is not None:
+            worker.deleteLater()
+        if thread is not None:
+            thread.deleteLater()
 
     def _show_update_dialog(self, info: UpdateInfo) -> None:
         dlg = UpdateDialog(info, self._palette, self.window())
