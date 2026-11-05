@@ -18,3 +18,11 @@ data/auth_browser.txt
 .idea/
 *.swp
 *.part*
+data/ytdlp_pkg/
+data/ytdlp_pkg.old/
+data/ytdlp_pkg.bad/
+data/ytdlp_last_check.txt
+data/logs/
+
+release/
+.pytest_cache/

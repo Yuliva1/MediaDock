@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 from typing import Any
+from urllib.parse import urlparse
 
 from config.paths import DATA_DIR
 
@@ -32,10 +33,30 @@ COOKIE_READ_MARKERS = (
     "permission denied",
 )
 
+_COOKIE_OPTION_KEYS = ("cookiesfrombrowser", "cookiefile")
+
 _state_file = DATA_DIR / "auth_browser.txt"
 _lock = threading.Lock()
 _remembered: str | None = None
 _loaded = False
+_cookies_enabled = False
+
+
+def set_cookies_enabled(enabled: bool) -> None:
+    global _cookies_enabled
+    _cookies_enabled = bool(enabled)
+
+
+def cookies_enabled() -> bool:
+    return _cookies_enabled
+
+
+def is_instagram_url(url: str) -> bool:
+    try:
+        host = urlparse(url).netloc.lower()
+    except ValueError:
+        return False
+    return "instagram.com" in host or "cdninstagram.com" in host
 
 
 def _load_remembered() -> str | None:
@@ -76,8 +97,24 @@ def _is_cookie_read_error(exc: BaseException) -> bool:
     return any(marker in msg for marker in COOKIE_READ_MARKERS)
 
 
+def _import_yt_dlp() -> Any:
+    try:
+        import yt_dlp
+
+        return yt_dlp
+    except Exception:
+        # Güncellenmiş paket bozuksa gömülü sürüme dön.
+        from core import ytdlp_updater
+
+        if not ytdlp_updater.disable_override():
+            raise
+        import yt_dlp
+
+        return yt_dlp
+
+
 def _run(url: str, opts: dict[str, Any], download: bool) -> dict[str, Any] | None:
-    import yt_dlp
+    yt_dlp = _import_yt_dlp()
 
     with yt_dlp.YoutubeDL(opts) as ydl:
         return ydl.extract_info(url, download=download)
@@ -91,10 +128,15 @@ def _browser_order() -> list[str]:
 
 
 def extract(url: str, opts: dict[str, Any], download: bool = False) -> dict[str, Any] | None:
+    instagram = is_instagram_url(url)
+    # Instagram için çerez seçenekleri ne olursa olsun yt-dlp'ye hiç iletilmez.
+    safe_opts = {k: v for k, v in opts.items() if k not in _COOKIE_OPTION_KEYS} if instagram else opts
+
     try:
-        return _run(url, opts, download)
+        return _run(url, safe_opts, download)
     except Exception as first_exc:
-        if not is_auth_error(first_exc):
+        # Tarayıcı çerezleri yalnızca kullanıcı açıkça izin verdiyse ve Instagram dışı sitelerde denenir.
+        if instagram or not _cookies_enabled or not is_auth_error(first_exc):
             raise
         first_error = first_exc
 

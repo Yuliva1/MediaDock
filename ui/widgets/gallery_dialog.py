@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import gc
 from pathlib import Path
-from typing import Any
 
-from PySide6.QtCore import QObject, QSize, Qt, QThread, Signal
+from PySide6.QtCore import QObject, Qt, QThread, Signal
 from PySide6.QtGui import QImageReader, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -15,13 +14,11 @@ from PySide6.QtWidgets import (
     QLabel,
     QPushButton,
     QScrollArea,
-    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
 
 from config.constants import IMAGE_FORMATS, resolve_platform_info
-from config.paths import THUMBNAILS_DIR
 from config.theme import ThemePalette, get_theme
 from core.metadata import GalleryItem, VideoMetadata, cache_thumbnail, format_duration
 from ui.icons import get_icon

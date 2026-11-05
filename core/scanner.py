@@ -2,18 +2,16 @@
 from __future__ import annotations
 
 import hashlib
-import subprocess
-import sys
 from datetime import datetime
 from pathlib import Path
 
-import requests
 from PySide6.QtCore import QObject, QThread, Signal
 
 from config.constants import SUPPORTED_AUDIO_EXTENSIONS, SUPPORTED_MEDIA_EXTENSIONS
-from config.paths import THUMBNAILS_DIR, is_frozen
+from config.paths import THUMBNAILS_DIR
 from core.database import DatabaseManager
-from core.ffmpeg import FFmpegManager, _subprocess_flags
+from core import ytdlp_updater
+from core.ffmpeg import FFmpegManager
 
 
 class _FolderScanWorker(QObject):
@@ -137,61 +135,20 @@ class _YtDlpUpdateWorker(QObject):
         self.do_upgrade = do_upgrade
 
     def run(self) -> None:
-        current_ver = "Bilinmiyor"
-        try:
-            import importlib
-            import yt_dlp.version
-
-            importlib.reload(yt_dlp.version)
-            current_ver = yt_dlp.version.__version__
-        except Exception:
-            pass
+        current_ver = ytdlp_updater.running_version() or "Bilinmiyor"
 
         if self.do_upgrade:
-            if is_frozen():
-                self.finished.emit(
-                    False,
-                    current_ver,
-                    "Paketlenmiş (.exe) sürümde motor güncellemesi uygulama sürümüyle birlikte yapılır.",
-                )
-                return
             try:
-                proc = subprocess.run(
-                    [sys.executable, "-m", "pip", "install", "--upgrade", "yt-dlp"],
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                    timeout=90,
-                    creationflags=_subprocess_flags(),
-                )
-                if proc.returncode == 0:
-                    import importlib
-                    import yt_dlp.version
-
-                    importlib.reload(yt_dlp.version)
-                    new_ver = yt_dlp.version.__version__
-                    self.finished.emit(True, new_ver, f"yt-dlp başarıyla güncellendi ({new_ver}).")
-                else:
-                    self.finished.emit(False, current_ver, "Güncelleme sırasında pip hatası oluştu.")
+                installed, new_ver, message = ytdlp_updater.install_latest()
             except Exception as exc:
                 self.finished.emit(False, current_ver, f"Güncelleme başarısız: {exc}")
+                return
+            self.finished.emit(installed, new_ver or current_ver, message)
             return
 
         try:
-            resp = requests.get("https://pypi.org/pypi/yt-dlp/json", timeout=8)
-            if resp.status_code == 200:
-                latest = str(resp.json().get("info", {}).get("version") or "").strip()
-                if latest and latest != current_ver:
-                    self.finished.emit(
-                        True,
-                        current_ver,
-                        f"Yeni sürüm mevcut: {latest} (Mevcut: {current_ver})",
-                    )
-                else:
-                    self.finished.emit(False, current_ver, f"yt-dlp güncel ({current_ver}).")
-            else:
-                self.finished.emit(False, current_ver, f"Sürüm sunucusuna ulaşılamadı (Mevcut: {current_ver}).")
+            update_available, running_ver, message = ytdlp_updater.check_latest()
+            self.finished.emit(update_available, running_ver, message)
         except Exception:
             self.finished.emit(False, current_ver, f"Bağlantı kurulamadı (Mevcut: {current_ver}).")
 

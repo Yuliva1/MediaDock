@@ -1,0 +1,64 @@
+name: build-and-release
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-dev.txt
+      - name: Lint (pyflakes)
+        run: python -m pyflakes --version && python -m pyflakes build_exe.py main.py config core ui tools tests
+      - name: Tests
+        run: python -m pytest -q
+        env:
+          QT_QPA_PLATFORM: offscreen
+
+  release:
+    needs: test
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-dev.txt
+      - name: Etiket sürümle eşleşiyor mu?
+        shell: python
+        run: |
+          import os, sys
+          sys.path.insert(0, ".")
+          from config.constants import APP_VERSION
+          tag = os.environ["GITHUB_REF_NAME"].lstrip("vV")
+          if tag != APP_VERSION:
+              sys.exit(f"Etiket ({tag}) ile config/constants.py sürümü ({APP_VERSION}) farklı.")
+      - name: FFmpeg ve Inno Setup
+        run: |
+          choco install ffmpeg innosetup -y --no-progress
+          echo "C:\Program Files (x86)\Inno Setup 6" | Out-File -Append -Encoding ascii $env:GITHUB_PATH
+      - name: Derle (exe + kurulum + delta paketi)
+        run: python build_exe.py --clean
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            release/MediaDock-Setup.exe
+            release/mediadock-app.zip
+            release/manifest.json
+            release/sha256sums.txt

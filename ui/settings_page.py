@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt, QThread, QTimer, Signal
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
@@ -18,12 +19,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from config.constants import APP_AUTHOR, APP_VERSION, VIDEO_FORMATS, VIDEO_QUALITIES
+from config.constants import APP_AUTHOR, APP_VERSION, DEFAULT_UPDATE_REPO, VIDEO_FORMATS, VIDEO_QUALITIES
 from config.paths import get_default_download_dir
 from config.settings import SettingsManager
 from config.theme import THEMES, ThemePalette, get_theme
 from core.downloader import reveal_in_explorer
 from core.ffmpeg import FFmpegManager
+from core.logutil import LOG_DIR, LOG_FILE, build_report
 from core.scanner import LibraryScanner, YtDlpUpdater
 from core.updater import UpdateCheckWorker, UpdateInfo
 from ui.icons import get_icon
@@ -159,6 +161,18 @@ class SettingsPage(QWidget):
         self.check_app_update_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.check_app_update_btn.clicked.connect(self._check_app_updates)
         btn_row.addWidget(self.check_app_update_btn)
+
+        open_log_btn = QPushButton("Günlüğü Aç")
+        open_log_btn.setObjectName("SecondaryButton")
+        open_log_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        open_log_btn.clicked.connect(self._open_log)
+        btn_row.addWidget(open_log_btn)
+
+        copy_report_btn = QPushButton("Hata Raporunu Kopyala")
+        copy_report_btn.setObjectName("SecondaryButton")
+        copy_report_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        copy_report_btn.clicked.connect(self._copy_report)
+        btn_row.addWidget(copy_report_btn)
         btn_row.addStretch()
 
         up_col.addLayout(btn_row)
@@ -420,6 +434,17 @@ class SettingsPage(QWidget):
         yt_block.addLayout(yt_top)
 
         engine_card.add_custom(yt_block)
+
+        self.cookies_toggle = self._make_toggle(False)
+        self.cookies_toggle.toggled.connect(
+            lambda v: self._settings.update(use_browser_cookies=v)
+        )
+        engine_card.add_row(
+            "Tarayıcı Çerezlerini Kullan",
+            "Giriş gerektiren sitelerde tarayıcınızdaki oturumu denemeye izin verir. "
+            "Varsayılan olarak kapalıdır. Instagram için bu özellik hesap güvenliği nedeniyle her zaman devre dışıdır.",
+            self.cookies_toggle,
+        )
         root.addWidget(engine_card)
 
         c_layout.addWidget(container)
@@ -457,6 +482,7 @@ class SettingsPage(QWidget):
         self.notify_toggle.setChecked(d.desktop_notifications, emit_signal=False)
         self.open_complete_toggle.setChecked(d.open_folder_on_complete, emit_signal=False)
         self.startup_toggle.setChecked(d.launch_on_startup, emit_signal=False)
+        self.cookies_toggle.setChecked(d.use_browser_cookies, emit_signal=False)
 
         self.ffmpeg_input.setText(d.ffmpeg_custom_path)
         self.refresh_dependency_labels()
@@ -492,37 +518,62 @@ class SettingsPage(QWidget):
     def _save_update_repo(self) -> None:
         repo = self.repo_input.text().strip()
         if not repo:
-            repo = "Yuliva/MediaDock"
+            repo = DEFAULT_UPDATE_REPO
             self.repo_input.setText(repo)
         self._settings.update(update_repo=repo)
         self.toast_requested.emit("Güncelleme deposu kaydedildi.", "success")
 
+    def _open_log(self) -> None:
+        target = LOG_FILE if LOG_FILE.exists() else LOG_DIR
+        if not reveal_in_explorer(str(target)):
+            self.toast_requested.emit("Günlük dosyası henüz oluşmadı.", "info")
+
+    def _copy_report(self) -> None:
+        QGuiApplication.clipboard().setText(build_report())
+        self.toast_requested.emit("Hata raporu panoya kopyalandı. Destek için yapıştırabilirsiniz.", "success")
+
     def _check_app_updates(self) -> None:
         self.check_app_update_btn.setEnabled(False)
         self.check_app_update_btn.setText("Denetleniyor...")
-        from PySide6.QtWidgets import QApplication
 
-        app = QApplication.instance()
-        if app:
-            app.processEvents()
+        repo = self._settings.data.update_repo or DEFAULT_UPDATE_REPO
 
-        try:
-            from core.updater import check_for_updates
+        thread = QThread(self)
+        worker = UpdateCheckWorker(repo, APP_VERSION)
+        worker.moveToThread(thread)
 
-            info = check_for_updates("Yuliva1/MediaDock", APP_VERSION)
+        def on_checked(info: UpdateInfo) -> None:
+            self.check_app_update_btn.setEnabled(True)
+            self.check_app_update_btn.setText("Güncellemeleri Denetle")
             if info.has_update:
-                dlg = UpdateDialog(info, self._palette, self.window())
-                dlg.exec()
+                QTimer.singleShot(150, lambda: self._show_update_dialog(info))
             else:
                 self.toast_requested.emit(
                     f"MediaDock güncel (v{info.current_version}). En yeni sürümü kullanıyorsunuz.",
                     "info",
                 )
-        except Exception as exc:
-            self.toast_requested.emit(f"Güncelleme denetimi başarısız: {exc}", "error")
-        finally:
+
+        def on_failed(err_msg: str) -> None:
             self.check_app_update_btn.setEnabled(True)
             self.check_app_update_btn.setText("Güncellemeleri Denetle")
+            self.toast_requested.emit(f"Güncelleme denetimi başarısız: {err_msg[:60]}", "error")
+
+        def cleanup() -> None:
+            worker.deleteLater()
+            thread.deleteLater()
+            self._check_update_thread = None
+
+        thread.started.connect(worker.run)
+        worker.finished.connect(on_checked)
+        worker.failed.connect(on_failed)
+        worker.finished.connect(thread.quit)
+        worker.failed.connect(thread.quit)
+        thread.finished.connect(cleanup)
+        thread.start()
+
+    def _show_update_dialog(self, info: UpdateInfo) -> None:
+        dlg = UpdateDialog(info, self._palette, self.window())
+        dlg.exec()
 
     def _run_manual_scan(self) -> None:
         self.scan_now_btn.setEnabled(False)

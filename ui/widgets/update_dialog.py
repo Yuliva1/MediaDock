@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
 
 from config.theme import ThemePalette, get_theme
 from core.metadata import format_bytes
-from core.updater import UpdateDownloadWorker, UpdateInfo, launch_installer_and_exit
+from core.updater import UpdateDownloadWorker, UpdateInfo, finalize_update
 from ui.icons import get_icon, get_pixmap
 from ui.widgets.custom_widgets import SmoothProgressBar
 
@@ -89,7 +89,10 @@ class UpdateDialog(QDialog):
         vc_layout.addStretch()
 
         if self.info.asset_size > 0:
-            sz_lbl = QLabel(f"Dosya Boyutu: {format_bytes(self.info.asset_size)}")
+            size_text = f"Tam paket: {format_bytes(self.info.asset_size)}"
+            if self.info.manifest_url and self.info.app_zip_url:
+                size_text += "  ·  Genellikle yalnızca değişen dosyalar indirilir"
+            sz_lbl = QLabel(size_text)
             sz_lbl.setObjectName("MutedText")
             vc_layout.addWidget(sz_lbl)
 
@@ -180,10 +183,10 @@ class UpdateDialog(QDialog):
 
     def _start_download(self) -> None:
         if self._downloaded_path:
-            launch_installer_and_exit(self._downloaded_path)
+            self._apply_update(self._downloaded_path)
             return
 
-        if not self.info.download_url:
+        if not (self.info.download_url or self.info.manifest_url):
             self.err_lbl.setText("İndirilebilir kurulum dosyası (setup.exe) bulunamadı.")
             self.err_lbl.show()
             return
@@ -196,10 +199,11 @@ class UpdateDialog(QDialog):
         self.progress_panel.show()
 
         thread = QThread(self)
-        worker = UpdateDownloadWorker(self.info.download_url, self.info.asset_name)
+        worker = UpdateDownloadWorker(self.info.download_url, self.info.asset_name, self.info)
         worker.moveToThread(thread)
 
         thread.started.connect(worker.run)
+        worker.status.connect(self.prog_status_lbl.setText)
         worker.progress.connect(self._on_progress)
         worker.finished.connect(self._on_finished)
         worker.failed.connect(self._on_failed)
@@ -227,16 +231,24 @@ class UpdateDialog(QDialog):
     def _on_finished(self, downloaded_path: str) -> None:
         self._cleanup_worker_thread()
         self._downloaded_path = downloaded_path
-        self.prog_status_lbl.setText("İndirme tamamlandı! Kurulum başlatılıyor...")
+        self.prog_status_lbl.setText("İndirme tamamlandı! Güncelleme uygulanıyor...")
         self.prog_pct_lbl.setText("%100")
         self.progress_bar.set_value(100.0)
-        self.update_btn.setText("Kuruluma Başla")
+        self.update_btn.setText("Güncellemeyi Uygula")
         self.update_btn.setEnabled(True)
         self.later_btn.setEnabled(True)
         self.later_btn.setText("Kapat")
 
         from PySide6.QtCore import QTimer
-        QTimer.singleShot(600, lambda: launch_installer_and_exit(downloaded_path))
+        QTimer.singleShot(600, lambda: self._apply_update(downloaded_path))
+
+    def _apply_update(self, path: str) -> None:
+        try:
+            finalize_update(path)
+        except SystemExit:
+            raise
+        except Exception as exc:
+            self._on_failed(f"Güncelleme uygulanamadı: {exc}")
 
     def _on_failed(self, error_message: str) -> None:
         self._cleanup_worker_thread()
