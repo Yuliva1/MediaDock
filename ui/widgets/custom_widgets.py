@@ -177,6 +177,8 @@ class SmoothProgressBar(QWidget):
             self._display_val = clamped
             self.update()
 
+    set_target_value = set_value
+
     def _on_anim(self, val: float) -> None:
         self._display_val = float(val)
         self.update()
@@ -397,10 +399,15 @@ class ToastOverlay(QFrame):
         self._anim = QVariantAnimation(self)
         self._anim.setDuration(180)
         self._anim.valueChanged.connect(lambda v: self._opacity.setOpacity(float(v)))
+        self._anim.finished.connect(self._on_anim_finished)
 
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.timeout.connect(self._fade_out)
+
+    def _on_anim_finished(self) -> None:
+        if self._opacity.opacity() <= 0.05:
+            self.hide()
 
     def show_toast(self, message: str, kind: str = "info", palette: ThemePalette | None = None) -> None:
         pal = palette or get_theme()
@@ -430,14 +437,8 @@ class ToastOverlay(QFrame):
 
     def _fade_out(self) -> None:
         self._anim.stop()
-        self._anim.setStartValue(1.0)
+        self._anim.setStartValue(self._opacity.opacity())
         self._anim.setEndValue(0.0)
-
-        def on_end() -> None:
-            if self._opacity.opacity() <= 0.05:
-                self.hide()
-
-        self._anim.finished.connect(on_end)
         self._anim.start()
 
     def reposition(self) -> None:

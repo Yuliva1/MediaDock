@@ -180,10 +180,16 @@ class UpdateDownloadWorker(QObject):
 
 
 def launch_installer_and_exit(installer_path: str) -> None:
-    if not Path(installer_path).is_file():
+    path_obj = Path(installer_path).resolve()
+    if not path_obj.is_file():
         raise FileNotFoundError(f"Kurulum dosyası bulunamadı: {installer_path}")
 
-    subprocess.Popen([installer_path], close_fds=True)
+    try:
+        os.startfile(str(path_obj))
+    except Exception:
+        flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        subprocess.Popen([str(path_obj)], creationflags=flags, close_fds=True)
+
     from PySide6.QtWidgets import QApplication
 
     app = QApplication.instance()
