@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import io
-import os
 import re
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
@@ -20,7 +19,8 @@ from config.constants import (
     resolve_platform_info,
 )
 from config.paths import THUMBNAILS_DIR
-from core.extractor import extract
+from core.extractor import cookies_enabled, extract
+from core.logutil import log_extraction_error
 
 WINDOWS_RESERVED_NAMES = {
     "CON", "PRN", "AUX", "NUL",
@@ -279,7 +279,26 @@ def cache_thumbnail(thumbnail_url: str, key_seed: str) -> str:
     return ""
 
 
+class MediaInfoError(RuntimeError):
+    # Mesajı zaten kullanıcıya gösterilecek Türkçe metindir; tekrar çevrilmez.
+    pass
+
+
+EXTRACTOR_BROKEN_MARKERS = (
+    "unable to extract",
+    "please report this issue",
+    "confirm you are on the latest version",
+    "no video formats found",
+)
+
+
+def _looks_like_extractor_failure(lower: str) -> bool:
+    return any(k in lower for k in EXTRACTOR_BROKEN_MARKERS)
+
+
 def translate_ytdlp_error(err: Exception | str) -> str:
+    if isinstance(err, MediaInfoError):
+        return str(err)
     raw = str(err or "")
     clean = re.sub(r"\x1b\[[0-9;]*m", "", raw)
     lower = clean.lower()
@@ -289,11 +308,22 @@ def translate_ytdlp_error(err: Exception | str) -> str:
             "Instagram bu görseli oturum açmadan sunmuyor. Hesabınızın güvenliği için kişisel çerezleriniz çekilmemiştir. "
             "Görseli indirmek için tarayıcıda sağ tıklayıp 'Resim adresini kopyala' diyerek MediaDock'a yapıştırabilirsiniz."
         )
-    if "private" not in lower and any(k in lower for k in ("not a bot", "sign in", "login", "log in")):
+    if "instagram" in lower and any(
+        k in lower
+        for k in ("requested content is not available", "rate-limit", "rate limit", "login required", "checkpoint")
+    ):
         return (
-            "Bu içerik için giriş gerekiyor. Firefox, Edge veya Chrome'da ilgili platforma giriş yap, "
-            "tarayıcıyı kapat ve tekrar dene; MediaDock oturumu otomatik kullanır."
+            "Instagram bu içeriği oturum açmadan sunmuyor veya istekleri geçici olarak sınırladı. "
+            "Gönderi özel ya da giriş gerektiriyorsa, hesap güvenliği için çerez kullanımı kapalı olduğundan indirilemez. "
+            "Bir süre bekleyip tekrar deneyin."
         )
+    if "private" not in lower and any(k in lower for k in ("not a bot", "sign in", "login", "log in")):
+        if cookies_enabled():
+            return (
+                "Bu içerik giriş gerektiriyor ve tarayıcı oturumunuzla da erişilemedi. "
+                "İlgili siteye tarayıcıda giriş yapıp tarayıcıyı kapatarak tekrar deneyin."
+            )
+        return "Bu içerik giriş gerektiriyor. Hesap güvenliği için çerez kullanımı kapalı olduğundan indirilemedi."
     if any(k in lower for k in ("private video", "private content", "this video is private")):
         return "Bu içerik gizli (özel) olarak ayarlanmış. Yalnızca herkese açık veya erişim izniniz olan içerikler indirilebilir."
     if any(k in lower for k in ("sign in", "login required", "logged-in", "cookies", "authentication", "members-only")):
@@ -302,6 +332,11 @@ def translate_ytdlp_error(err: Exception | str) -> str:
         return "Bu video bulunduğunuz bölge/ülke için erişime kapatılmış."
     if any(k in lower for k in ("video unavailable", "has been removed", "does not exist", "404", "not found")):
         return "İçerik bulunamadı veya yayından kaldırılmış. Lütfen bağlantının doğruluğunu kontrol edin."
+    if _looks_like_extractor_failure(lower):
+        return (
+            "İndirme motoru (yt-dlp) bu bağlantıyı çözemedi; site yapısı değişmiş ve motor güncel değil olabilir. "
+            "Ayarlar > İndirme Motorları bölümünden yt-dlp'yi güncelleyip MediaDock'u yeniden başlatın."
+        )
     if "unsupported url" in lower:
         return "Bu bağlantı desteklenen bir medya kaynağı olarak algılanamadı."
     if any(k in lower for k in ("getaddrinfo failed", "timed out", "connection", "network is unreachable")):
@@ -453,6 +488,19 @@ def fetch_image_metadata(url: str) -> VideoMetadata:
     )
 
 
+def _refresh_engine_if_broken(exc: Exception) -> None:
+    # Extractor bozulmuş gibi görünüyorsa yt-dlp güncellemesini arka planda başlatır
+    # (en fazla saatte bir). Yeni sürüm, uygulama yeniden başlatılınca etkinleşir.
+    if not _looks_like_extractor_failure(str(exc).lower()):
+        return
+    try:
+        from core.ytdlp_updater import run_in_background
+
+        run_in_background(None, min_interval=3600)
+    except Exception:
+        pass
+
+
 def fetch_video_metadata(url: str, ffmpeg_location: str | None = None) -> VideoMetadata:
     if is_direct_image_url(url):
         try:
@@ -485,10 +533,14 @@ def fetch_video_metadata(url: str, ffmpeg_location: str | None = None) -> VideoM
         ydl_opts["ffmpeg_location"] = ffmpeg_location
 
     info: dict[str, Any] | None = None
+    last_error: Exception | None = None
     try:
         info = extract(url, ydl_opts)
-    except Exception:
+    except Exception as exc:
+        last_error = exc
         info = None
+        log_extraction_error(url, exc)
+        _refresh_engine_if_broken(exc)
 
     if not info:
         scraped_items = scrape_webpage_gallery(url)
@@ -518,7 +570,9 @@ def fetch_video_metadata(url: str, ffmpeg_location: str | None = None) -> VideoM
                 is_gallery=True,
                 gallery_items=scraped_items,
             )
-        raise RuntimeError("Medya bilgileri alınamadı.")
+        if last_error is not None:
+            raise MediaInfoError(translate_ytdlp_error(last_error)) from last_error
+        raise MediaInfoError("Medya bilgileri alınamadı.")
 
     entries = [e for e in info.get("entries", []) if e] if info.get("entries") else []
     extractor = str(info.get("extractor_key") or info.get("extractor") or "")

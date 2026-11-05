@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from config.constants import APP_NAME, APP_SUBTITLE, APP_VERSION
+from config.constants import APP_NAME, APP_SUBTITLE, APP_VERSION, DEFAULT_UPDATE_REPO
 from config.settings import SettingsManager
 from config.theme import ThemePalette, build_stylesheet, get_theme
 from core.database import DatabaseManager
@@ -204,16 +204,30 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(2500, self._check_updates_background)
 
     def _check_updates_background(self) -> None:
-        try:
-            from core.updater import check_for_updates
+        repo = self.settings.data.update_repo or DEFAULT_UPDATE_REPO
+        thread = QThread(self)
+        worker = UpdateCheckWorker(repo, APP_VERSION)
+        worker.moveToThread(thread)
 
-            info = check_for_updates("Yuliva1/MediaDock", APP_VERSION)
+        def on_checked(info: UpdateInfo) -> None:
             if info.has_update:
                 self.show_toast(f"Yeni MediaDock sürümü mevcut: v{info.latest_version}", "info")
-                dlg = UpdateDialog(info, self.palette, self)
-                dlg.exec()
-        except Exception:
-            pass
+                QTimer.singleShot(250, lambda: self._show_update_dialog(info))
+
+        def cleanup() -> None:
+            worker.deleteLater()
+            thread.deleteLater()
+
+        thread.started.connect(worker.run)
+        worker.finished.connect(on_checked)
+        worker.finished.connect(thread.quit)
+        worker.failed.connect(thread.quit)
+        thread.finished.connect(cleanup)
+        thread.start()
+
+    def _show_update_dialog(self, info: UpdateInfo) -> None:
+        dlg = UpdateDialog(info, self.palette, self)
+        dlg.exec()
 
     def _run_dependency_check(self) -> None:
         status = self.ffmpeg_mgr.check_dependencies()

@@ -13,31 +13,39 @@ YouTube, Kick, X (Twitter), Instagram, TikTok, Twitch, Reddit, Facebook, Vimeo, 
 - **Ultra Yüksek Performans & Akıcı UI:** PySide6 ile 60 FPS akıcı arayüz, anında başlatma, asenkron çok kanallı (multi-threaded) mimari.
 - **Görsel (Image) İndirme Desteği:** Web üzerindeki görselleri veya doğrudan görsel URL'lerini anında algılar; Orijinal, PNG, JPG ve WEBP format seçenekleriyle diske kaydeder ve kütüphaneye ekler.
 - **Adobe Premiere Pro Uyumluluğu:** MP4 seçildiğinde H.264 video ve AAC ses kodeklerine öncelik verilir. "Premiere Pro için optimize et" seçeneği ile YUV420p piksel formatı ve CFR çıktısı üretilir.
-- **Otomatik Çerez & Oturum Algılama:** Edge, Chrome, Firefox, Brave, Opera ve Vivaldi tarayıcılarındaki açık oturumları arka planda otomatik kullanır.
+- **Çerezsiz & Güvenli Oturum Politikası:** Tarayıcı çerezleri varsayılan olarak KAPALIDIR. İsteğe bağlı olarak Ayarlar'dan açılabilir; Instagram için hesap güvenliği nedeniyle çerez kullanımı her zaman devre dışıdır.
+- **Kendini Güncelleyen İndirme Motoru:** yt-dlp, MediaDock yeniden derlenmeden arka planda (günde en fazla bir kez) güncellenir. Ayarlar > İndirme Motorları bölümünden elle de güncellenebilir. Yeni sürüm uygulama yeniden başlatılınca etkinleşir.
+- **Hata Günlüğü:** İndirme hataları `data/logs/mediadock.log` dosyasına (çerez ve kişisel veri olmadan) yazılır.
 - **Gelişmiş Dosya Gezgini Seçimi:** İndirme tamamlandığında veya klasör butonuna tıklandığında Windows Gezgini doğrudan ilgili dosyayı seçili olarak açar.
 - **Sürüm Güncelleme & Changelog Dağıtım Sistemi:** Arkadaşlarınıza kurulum dosyasını gönderdiğinizde, yeni bir güncelleme yayınladığınızda uygulama açılışta veya Ayarlar sayfasında yeni sürümü otomatik tespit eder, değişiklik günlüğünü (changelog) gösterir ve tek tıkla indirip günceller.
 - **Gizlilik & Temiz Meta Veri:** Setup ve çalıştırılabilir dosya özelliklerinde yalnızca `Yuliva` bilgisi yer alır.
 
 ---
 
-## Arkadaşlara Güncelleme Nasıl Dağıtılır?
+## Güncelleme Nasıl Dağıtılır?
 
-MediaDock, profesyonel açık kaynak projelerdeki gibi **GitHub Releases API** altyapısıyla çalışır:
+1. **Sürümü yükseltin:** yalnızca `config/constants.py` içindeki `APP_VERSION` değerini değiştirin.
+   `version_info.txt` ve kurulum sürümü build sırasında buradan üretilir.
+2. **Etiket atın:** `git tag v1.0.6 && git push origin v1.0.6`
+   GitHub Actions testleri çalıştırır, uygulamayı derler ve release'e şunları yükler:
+   `MediaDock-Setup.exe`, `mediadock-app.zip`, `manifest.json`, `sha256sums.txt`.
+   (Elle derleyecekseniz: `python build_exe.py` → çıktılar `release/` klasöründe.)
+3. **Kullanıcıda ne olur?**
+   - Uygulama yeni sürümü bulunca değişiklik notlarıyla birlikte güncelleme penceresi açılır.
+   - **Delta güncelleme:** yalnızca değişen dosyalar `mediadock-app.zip` içinden HTTP Range ile indirilir
+     (tipik olarak birkaç MB), SHA-256 ile doğrulanır, yerine konur ve uygulama kendini yeniden başlatır.
+   - **Yedek yol:** delta mümkün değilse (klasör yazılamıyor, manifest yok, değişiklik çok büyük)
+     tam `MediaDock-Setup.exe` indirilir, hash'i `sha256sums.txt` ile doğrulanır ve
+     sihirbazsız (`/SILENT`) kurulur.
+   - Hata olursa dosyalar geri alınır; eski `.old` dosyaları bir sonraki açılışta temizlenir.
 
-1. **GitHub Deposu Oluşturun:** Projenizi GitHub'da (örneğin `Yuliva/MediaDock`) barındırın.
-2. **Release (Sürüm) Yayınlayın:**
-   - GitHub deposunda **Releases -> Draft a new release** butonuna tıklayın.
-   - Tag olarak yeni sürüm numarasını girin (Örn: `v1.1.0`).
-   - Sürüm başlığı ve **Changelog (Yenilikler)** metnini markdown olarak yazın (neler eklendi, hangi hatalar çözüldü).
-   - Derlenen `MediaDock-Setup.exe` dosyasını release alanına sürükleyip yükleyin.
-   - **Publish release** butonuna basın.
-3. **Arkadaşlarınızın Ekranında Ne Olacak?**
-   - Arkadaşlarınız MediaDock'u açtığında veya Ayarlar sayfasından "Güncellemeleri Denetle" butonuna bastığında uygulama arka planda GitHub API'sini sorgular.
-   - Yeni sürüm varsa ekranda şık, Linear temalı **MediaDock Güncellemesi** penceresi açılır.
-   - Sizin yazdığınız Changelog (yenilikler) doğrudan bu pencerede gösterilir.
-   - **"Şimdi Güncelle ve Yeniden Başlat"** butonuna tıklandığında yeni setup dosyası arka planda indirilir ve tek tıkla kurulum tamamlanır.
+> İlk delta güncelleme, bu mekanizmayı içeren sürümden **sonraki** sürümde çalışır; eski sürümler tam kurulumla güncellenir.
 
----
+## Hata Ayıklama
+
+- Ayarlar → **Günlüğü Aç** / **Hata Raporunu Kopyala** (sürüm, yt-dlp, sistem ve son günlük satırları).
+- Yakalanmayan hatalar `%LOCALAPPDATA%\MediaDock\data\logs\mediadock.log`, yerel çökmeler `crash.log` dosyasına yazılır.
+- Testler: `pip install -r requirements-dev.txt && python -m pytest`
 
 ## Kurulum ve Çalıştırma
 
@@ -57,4 +65,4 @@ python main.py
 ```bash
 python build_exe.py
 ```
-Bu komut sırasıyla PyInstaller paketlemesini yapar, FFmpeg ikililerini içine kopyalar ve Inno Setup ile tek parça `installer/MediaDock-Setup.exe` dosyasını üretir.
+Bu komut sırasıyla sürüm bilgisini üretir, PyInstaller paketlemesini yapar, FFmpeg'i `bin/` altına **tek kopya** olarak ekler, Inno Setup ile `installer/MediaDock-Setup.exe` dosyasını ve `tools/make_release_assets.py` ile delta paketini (`release/`) oluşturur.

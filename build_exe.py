@@ -11,11 +11,71 @@ from PIL import Image, ImageDraw
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
+from config.constants import APP_AUTHOR, APP_NAME, APP_SUBTITLE, APP_VERSION  # noqa: E402
+
 ISCC_CANDIDATES = (
     Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Inno Setup 6" / "ISCC.exe",
     Path(os.environ.get("ProgramFiles(x86)", "")) / "Inno Setup 6" / "ISCC.exe",
     Path(os.environ.get("ProgramFiles", "")) / "Inno Setup 6" / "ISCC.exe",
 )
+
+
+VERSION_INFO_TEMPLATE = """VSVersionInfo(
+  ffi=FixedFileInfo(
+    filevers={tup},
+    prodvers={tup},
+    mask=0x3f,
+    flags=0x0,
+    OS=0x40004,
+    fileType=0x1,
+    subtype=0x0,
+    date=(0, 0)
+  ),
+  kids=[
+    StringFileInfo(
+      [
+        StringTable(
+          '040904B0',
+          [
+            StringStruct('CompanyName', '{author}'),
+            StringStruct('FileDescription', '{name} - {subtitle}'),
+            StringStruct('FileVersion', '{ver4}'),
+            StringStruct('InternalName', '{name}'),
+            StringStruct('LegalCopyright', 'Copyright (C) 2026 {author}'),
+            StringStruct('OriginalFilename', '{name}.exe'),
+            StringStruct('ProductName', '{name}'),
+            StringStruct('ProductVersion', '{ver4}')
+          ]
+        )
+      ]
+    ),
+    VarFileInfo([VarStruct('Translation', [1033, 1200])])
+  ]
+)
+"""
+
+
+def version_tuple(version: str) -> tuple[int, int, int, int]:
+    nums = [int(p) for p in version.split(".") if p.isdigit()][:4]
+    return tuple(nums + [0] * (4 - len(nums)))  # type: ignore[return-value]
+
+
+def render_version_info(version: str = APP_VERSION) -> str:
+    tup = version_tuple(version)
+    return VERSION_INFO_TEMPLATE.format(
+        tup=tup,
+        ver4=".".join(map(str, tup)),
+        author=APP_AUTHOR,
+        name=APP_NAME,
+        subtitle=APP_SUBTITLE,
+    )
+
+
+def write_version_info() -> Path:
+    """version_info.txt'i config/constants.py'deki sürümden üretir (tek kaynak)."""
+    path = ROOT / "version_info.txt"
+    path.write_text(render_version_info(), encoding="utf-8")
+    return path
 
 
 def generate_app_ico() -> Path:
@@ -70,6 +130,8 @@ def build() -> int:
 
     export_svg_assets()
     generate_app_ico()
+    write_version_info()
+    print(f"Sürüm: {APP_VERSION}")
 
     dist_app = ROOT / "dist" / "MediaDock"
     if dist_app.exists():
@@ -89,12 +151,15 @@ def build() -> int:
         print("Inno Setup bulunamadi; kurulum dosyasi uretilmedi.")
         return 0
 
-    result = subprocess.run([str(iscc), str(ROOT / "installer.iss")], cwd=str(ROOT))
+    result = subprocess.run([str(iscc), f"/DAppVersion={APP_VERSION}", str(ROOT / "installer.iss")], cwd=str(ROOT))
     if result.returncode == 0:
         inst_target = ROOT / "installer" / "MediaDock-Setup.exe"
         if inst_target.exists():
             shutil.copy2(inst_target, ROOT / "MediaDock-Setup.exe")
         print(f"Kurulum dosyasi: {inst_target}")
+    if result.returncode == 0:
+        # Delta güncelleme paketi, manifest ve SHA-256 listesi (release/ klasörüne).
+        result = subprocess.run([sys.executable, str(ROOT / "tools" / "make_release_assets.py")], cwd=str(ROOT))
     return result.returncode
 
 

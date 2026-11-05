@@ -99,6 +99,13 @@ class FFmpegManager:
             if extra_bin.is_dir():
                 candidates_dirs.append(extra_bin)
 
+        # Özel yol ve pakete eklenen ffmpeg, sistemdekinden önce denenir (tutarlı sürüm).
+        for folder in candidates_dirs:
+            ff = folder / f"ffmpeg{exe_suffix}"
+            fp = folder / f"ffprobe{exe_suffix}"
+            if ff.is_file():
+                return str(ff.resolve()), (str(fp.resolve()) if fp.is_file() else "")
+
         sys_ffmpeg = shutil.which("ffmpeg")
         sys_ffprobe = shutil.which("ffprobe")
         if sys_ffmpeg:

@@ -17,9 +17,11 @@ from config.constants import resolve_platform_info
 from config.settings import SettingsManager
 from core.database import DatabaseManager, now_iso
 from core.extractor import extract
+from core.logutil import log_extraction_error
 from core.ffmpeg import FFmpegCancelledError, FFmpegManager
 from core.metadata import (
     GalleryItem,
+    MediaInfoError,
     VideoMetadata,
     cache_thumbnail,
     fetch_video_metadata,
@@ -462,6 +464,8 @@ class _DownloadWorker(QObject):
             self._cleanup_temp_files(out_dir, self.task.get("file_stem", ""))
             self.cancelled.emit(task_id)
         except Exception as exc:
+            if not isinstance(exc, MediaInfoError):
+                log_extraction_error(url, exc)
             msg = translate_ytdlp_error(exc)
             self.failed.emit(task_id, msg)
 

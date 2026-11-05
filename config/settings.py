@@ -34,6 +34,7 @@ class AppSettingsData:
     open_folder_on_complete: bool = False
     auto_check_updates: bool = True
     update_repo: str = DEFAULT_UPDATE_REPO
+    use_browser_cookies: bool = False
 
     def __post_init__(self) -> None:
         if not self.download_dir:

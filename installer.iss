@@ -1,5 +1,8 @@
 #define AppName "MediaDock"
-#define AppVersion "1.0.9"
+; Sürüm build_exe.py tarafından /DAppVersion=... ile verilir (tek kaynak: config/constants.py).
+#ifndef AppVersion
+  #define AppVersion "0.0.0"
+#endif
 #define AppExe "MediaDock.exe"
 
 [Setup]
@@ -24,6 +27,7 @@ WizardStyle=modern
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 CloseApplications=yes
+RestartApplications=no
 VersionInfoCompany=Yuliva
 VersionInfoDescription=MediaDock - Universal Media Downloader
 VersionInfoVersion={#AppVersion}
@@ -47,3 +51,4 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopico
 
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#AppExe}"; Flags: nowait runasoriginaluser; Check: WizardSilent

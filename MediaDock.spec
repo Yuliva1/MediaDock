@@ -35,6 +35,18 @@ a = Analysis(
         "PySide6.QtQml",
         "PySide6.Qt3DCore",
         "PySide6.QtPdf",
+        "PySide6.QtPdfWidgets",
+        "PySide6.QtQuickWidgets",
+        "PySide6.QtVirtualKeyboard",
+        "PySide6.QtCharts",
+        "PySide6.QtDataVisualization",
+        "PySide6.QtMultimedia",
+        "PySide6.QtMultimediaWidgets",
+        "PySide6.QtOpenGL",
+        "PySide6.QtOpenGLWidgets",
+        # ffmpeg tek kopya olarak dist/bin'e build_exe.py ile eklenir; paket içi kopyalar çıkarılır.
+        "imageio_ffmpeg",
+        "static_ffmpeg",
         "tkinter",
         "matplotlib",
         "scipy",
@@ -51,6 +63,29 @@ a = Analysis(
     noarchive=False,
     optimize=1,
 )
+
+# Kullanılmayan Qt dosyalarını ayıkla: yazılım OpenGL, çeviriler, QML/Quick/PDF DLL'leri.
+_DROP_BINARIES = (
+    "opengl32sw.dll",
+    "qt6pdf",
+    "qt6quick",
+    "qt6qml",
+    "qt6virtualkeyboard",
+)
+
+
+def _keep_binary(entry) -> bool:
+    name = entry[0].replace("\\", "/").lower()
+    return not any(Path(name).name.startswith(d) for d in _DROP_BINARIES)
+
+
+def _keep_data(entry) -> bool:
+    name = entry[0].replace("\\", "/").lower()
+    return "pyside6/translations/" not in name and "/qml/" not in name
+
+
+a.binaries = [b for b in a.binaries if _keep_binary(b)]
+a.datas = [d for d in a.datas if _keep_data(d)]
 
 pyz = PYZ(a.pure)
 
