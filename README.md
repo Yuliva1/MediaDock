@@ -201,7 +201,6 @@ build_exe.py             Derleme betiği
 MediaDock.spec           PyInstaller yapılandırması
 installer.iss            Inno Setup betiği
 .github/workflows/       Test ve release otomasyonu
-docs/DEVIR_NOTU.md       Teknik devir notu, kararlar ve yapılacaklar
 ```
 
 ---
