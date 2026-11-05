@@ -2,6 +2,10 @@
 
 Sürüm numarası tek kaynaktan gelir: `config/constants.py` → `APP_VERSION`.
 
+## 1.1.3 — 2026-11-06
+
+- **"Güncellemeleri Denetle" düğmesi sessiz kalıyordu.** Denetim sonucu, arka plan iş parçacığında çalışan bir kapanış fonksiyonuna bağlanmıştı; güncelleme penceresi ana iş parçacığında açılmıyordu. Sonuç artık pencere sınıflarının yöntemlerine bağlanıyor (`ui/settings_page.py`, `ui/main_window.py`). Windows'ta elle denenmedi.
+
 ## 1.1.2 — 2026-11-06
 
 Güvenlik ve dayanıklılık sürümü.

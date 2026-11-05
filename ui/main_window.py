@@ -208,22 +208,30 @@ class MainWindow(QMainWindow):
         thread = QThread(self)
         worker = UpdateCheckWorker(repo, APP_VERSION)
         worker.moveToThread(thread)
-
-        def on_checked(info: UpdateInfo) -> None:
-            if info.has_update:
-                self.show_toast(f"Yeni MediaDock sürümü mevcut: v{info.latest_version}", "info")
-                QTimer.singleShot(250, lambda: self._show_update_dialog(info))
-
-        def cleanup() -> None:
-            worker.deleteLater()
-            thread.deleteLater()
+        self._bg_update_thread = thread
+        self._bg_update_worker = worker
 
         thread.started.connect(worker.run)
-        worker.finished.connect(on_checked)
+        worker.finished.connect(self._on_background_update_checked)
         worker.finished.connect(thread.quit)
         worker.failed.connect(thread.quit)
-        thread.finished.connect(cleanup)
+        thread.finished.connect(self._cleanup_background_update)
         thread.start()
+
+    def _on_background_update_checked(self, info: UpdateInfo) -> None:
+        if info.has_update:
+            self.show_toast(f"Yeni MediaDock sürümü mevcut: v{info.latest_version}", "info")
+            QTimer.singleShot(250, lambda: self._show_update_dialog(info))
+
+    def _cleanup_background_update(self) -> None:
+        worker = getattr(self, "_bg_update_worker", None)
+        thread = getattr(self, "_bg_update_thread", None)
+        self._bg_update_worker = None
+        self._bg_update_thread = None
+        if worker is not None:
+            worker.deleteLater()
+        if thread is not None:
+            thread.deleteLater()
 
     def _show_update_dialog(self, info: UpdateInfo) -> None:
         dlg = UpdateDialog(info, self.palette, self)
