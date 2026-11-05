@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt, QThread, QTimer, Signal
@@ -625,17 +627,32 @@ class SettingsPage(QWidget):
             workdir_str = str(main_py.parent)
 
         icon_str = str(ico_path) if ico_path.is_file() else target_str
+        # Yollar betiğe gömülmez; özel karakterler (' $ `) komut olarak yorumlanmasın.
         ps_script = (
             "$ws = New-Object -ComObject WScript.Shell; "
-            f'$s = $ws.CreateShortcut("{lnk_path}"); '
-            f'$s.TargetPath = "{target_str}"; '
-            f"$s.Arguments = '{args_str}'; "
-            f'$s.WorkingDirectory = "{workdir_str}"; '
-            f'$s.IconLocation = "{icon_str}"; '
+            "$s = $ws.CreateShortcut($env:MD_LNK); "
+            "$s.TargetPath = $env:MD_TARGET; "
+            "$s.Arguments = $env:MD_ARGS; "
+            "$s.WorkingDirectory = $env:MD_WORKDIR; "
+            "$s.IconLocation = $env:MD_ICON; "
             "$s.Save()"
         )
+        ps_env = {
+            **os.environ,
+            "MD_LNK": str(lnk_path),
+            "MD_TARGET": target_str,
+            "MD_ARGS": args_str,
+            "MD_WORKDIR": workdir_str,
+            "MD_ICON": icon_str,
+        }
         try:
-            subprocess.run(["powershell", "-NoProfile", "-Command", ps_script], check=True, capture_output=True)
+            subprocess.run(
+                ["powershell", "-NoProfile", "-Command", ps_script],
+                check=True,
+                capture_output=True,
+                env=ps_env,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000),
+            )
             self.toast_requested.emit("Masaüstüne MediaDock kısayolu oluşturuldu.", "success")
         except Exception as exc:
             self.toast_requested.emit(f"Kısayol oluşturulamadı: {exc}", "error")

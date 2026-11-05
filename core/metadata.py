@@ -288,12 +288,30 @@ EXTRACTOR_BROKEN_MARKERS = (
     "unable to extract",
     "please report this issue",
     "confirm you are on the latest version",
-    "no video formats found",
 )
+
+# yt-dlp bu ifadeyi motor güncel olsa bile, içerikte video yoksa (görsel gönderi) üretir.
+NO_VIDEO_MARKER = "no video formats found"
 
 
 def _looks_like_extractor_failure(lower: str) -> bool:
+    if NO_VIDEO_MARKER in lower and not any(k in lower for k in ("unable to extract", "traceback")):
+        return False
     return any(k in lower for k in EXTRACTOR_BROKEN_MARKERS)
+
+
+def _ytdlp_is_fresh(max_age_days: int = 10) -> bool:
+    # yt-dlp sürümü YYYY.MM.DD biçimindedir; yakın tarihliyse motor eski sayılmaz.
+    import datetime as _dt
+
+    try:
+        from core.ytdlp_updater import running_version
+
+        parts = re.findall(r"\d+", running_version())[:3]
+        released = _dt.date(int(parts[0]), int(parts[1]), int(parts[2]))
+        return (_dt.date.today() - released).days <= max_age_days
+    except Exception:
+        return False
 
 
 def translate_ytdlp_error(err: Exception | str) -> str:
@@ -317,6 +335,15 @@ def translate_ytdlp_error(err: Exception | str) -> str:
             "Gönderi özel ya da giriş gerektiriyorsa, hesap güvenliği için çerez kullanımı kapalı olduğundan indirilemez. "
             "Bir süre bekleyip tekrar deneyin."
         )
+    if "instagram" in lower and NO_VIDEO_MARKER in lower:
+        return (
+            "Bu Instagram gönderisinde indirilebilir video yok; görsel gönderisi veya görsel içeren çoklu paylaşım olabilir. "
+            "İndirme motoru (yt-dlp) Instagram görsellerini desteklemiyor, bu yüzden güncellemek sorunu çözmez. "
+            "Videolar ve Reels indirilebilir. Görsel için tarayıcıda sağ tıklayıp 'Resim adresini kopyala' ile "
+            "aldığınız bağlantıyı MediaDock'a yapıştırabilirsiniz."
+        )
+    if NO_VIDEO_MARKER in lower and not _looks_like_extractor_failure(lower):
+        return "Bu bağlantıda indirilebilir bir video biçimi bulunamadı. İçerik görsel ya da yalnızca oturumla erişilen bir içerik olabilir."
     if "private" not in lower and any(k in lower for k in ("not a bot", "sign in", "login", "log in")):
         if cookies_enabled():
             return (
@@ -332,6 +359,12 @@ def translate_ytdlp_error(err: Exception | str) -> str:
         return "Bu video bulunduğunuz bölge/ülke için erişime kapatılmış."
     if any(k in lower for k in ("video unavailable", "has been removed", "does not exist", "404", "not found")):
         return "İçerik bulunamadı veya yayından kaldırılmış. Lütfen bağlantının doğruluğunu kontrol edin."
+    if _looks_like_extractor_failure(lower) and _ytdlp_is_fresh():
+        return (
+            "İndirme motoru (yt-dlp) bu bağlantıyı çözemedi, ancak sürümü güncel görünüyor. "
+            "Site yapısı değişmiş olabilir; düzeltme yayınlanana kadar bir süre sonra tekrar deneyin. "
+            "Ayrıntıyı Ayarlar > Hata Raporunu Kopyala ile paylaşabilirsiniz."
+        )
     if _looks_like_extractor_failure(lower):
         return (
             "İndirme motoru (yt-dlp) bu bağlantıyı çözemedi; site yapısı değişmiş ve motor güncel değil olabilir. "

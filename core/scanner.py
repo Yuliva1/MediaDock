@@ -33,8 +33,17 @@ class _FolderScanWorker(QObject):
             known_paths = self.db.get_known_file_paths()
             added_count = 0
 
-            for entry in sorted(self.folder.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
-                if not entry.is_file():
+            def _mtime(path: Path) -> float:
+                try:
+                    return path.stat().st_mtime
+                except OSError:
+                    return 0.0
+
+            for entry in sorted(self.folder.iterdir(), key=_mtime, reverse=True):
+                try:
+                    if not entry.is_file():
+                        continue
+                except OSError:
                     continue
                 lower_name = entry.name.lower()
                 if lower_name.endswith((".part", ".ytdl", ".premiere_tmp.mp4")) or ".part-" in lower_name:
@@ -46,7 +55,10 @@ class _FolderScanWorker(QObject):
                 if resolved_str in known_paths:
                     continue
 
-                stat = entry.stat()
+                try:
+                    stat = entry.stat()
+                except OSError:
+                    continue
                 if stat.st_size == 0:
                     continue
 
