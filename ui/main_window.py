@@ -204,30 +204,16 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(2500, self._check_updates_background)
 
     def _check_updates_background(self) -> None:
-        repo = "Yuliva1/MediaDock"
-        thread = QThread(self)
-        worker = UpdateCheckWorker(repo, APP_VERSION)
-        worker.moveToThread(thread)
+        try:
+            from core.updater import check_for_updates
 
-        def on_checked(info: UpdateInfo) -> None:
+            info = check_for_updates("Yuliva1/MediaDock", APP_VERSION)
             if info.has_update:
                 self.show_toast(f"Yeni MediaDock sürümü mevcut: v{info.latest_version}", "info")
-                QTimer.singleShot(250, lambda: self._show_update_dialog(info))
-
-        def cleanup() -> None:
-            worker.deleteLater()
-            thread.deleteLater()
-
-        thread.started.connect(worker.run)
-        worker.finished.connect(on_checked)
-        worker.finished.connect(thread.quit)
-        worker.failed.connect(thread.quit)
-        thread.finished.connect(cleanup)
-        thread.start()
-
-    def _show_update_dialog(self, info: UpdateInfo) -> None:
-        dlg = UpdateDialog(info, self.palette, self)
-        dlg.exec()
+                dlg = UpdateDialog(info, self.palette, self)
+                dlg.exec()
+        except Exception:
+            pass
 
     def _run_dependency_check(self) -> None:
         status = self.ffmpeg_mgr.check_dependencies()
