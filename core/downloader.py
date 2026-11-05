@@ -13,7 +13,7 @@ from typing import Any
 import requests
 from PySide6.QtCore import QObject, QThread, Signal
 
-from config.constants import resolve_platform_info
+from config.constants import SUPPORTED_MEDIA_EXTENSIONS, resolve_platform_info
 from config.settings import SettingsManager
 from core.database import DatabaseManager, now_iso
 from core.extractor import extract
@@ -1005,6 +1005,9 @@ def open_file_in_default_player(file_path: str) -> bool:
     target = Path(file_path)
     if not target.is_file():
         return False
+    # .exe/.bat/.lnk gibi çalıştırılabilir dosyalar "aç" ile çalışmasın.
+    if target.suffix.lower() not in SUPPORTED_MEDIA_EXTENSIONS:
+        return reveal_in_explorer(str(target))
     try:
         if sys.platform == "win32":
             os.startfile(str(target))
@@ -1022,32 +1025,36 @@ def _select_item_in_explorer(item_path: str) -> bool:
         return False
 
     import subprocess
+
+    # Dosya adı (video başlığından gelir) PowerShell kodu olarak yorumlanmasın diye
+    # yol betiğe gömülmez, ortam değişkeniyle iletilir.
     ps_cmd = (
-        f"$p = '{str(target)}'; "
-        f"$dir = [System.IO.Path]::GetDirectoryName($p); "
-        f"$name = [System.IO.Path]::GetFileName($p); "
-        f"$sh = New-Object -ComObject Shell.Application; "
-        f"$found = $false; "
-        f"foreach ($w in $sh.Windows()) {{ "
-        f"  try {{ "
-        f"    $loc = [System.Uri]::UnescapeDataString($w.LocationURL); "
-        f"    if ($loc -like 'file:///*') {{ "
-        f"      $winPath = $loc.Substring(8).Replace('/', '\\'); "
-        f"      if ($winPath.TrimEnd('\\') -ieq $dir.TrimEnd('\\')) {{ "
-        f"        $items = $w.Document.Folder.Items(); "
-        f"        $it = $items.Item($name); "
-        f"        if ($it) {{ $w.Document.SelectItem($it, 17); $found = $true; break; }} "
-        f"      }} "
-        f"    }} "
-        f"  }} catch {{}} "
-        f"}}; "
-        f"if (-not $found) {{ & explorer.exe /select,$p }}"
+        "$p = $env:MEDIADOCK_TARGET; "
+        "$dir = [System.IO.Path]::GetDirectoryName($p); "
+        "$name = [System.IO.Path]::GetFileName($p); "
+        "$sh = New-Object -ComObject Shell.Application; "
+        "$found = $false; "
+        "foreach ($w in $sh.Windows()) { "
+        "  try { "
+        "    $loc = [System.Uri]::UnescapeDataString($w.LocationURL); "
+        "    if ($loc -like 'file:///*') { "
+        "      $winPath = $loc.Substring(8).Replace('/', '\\'); "
+        "      if ($winPath.TrimEnd('\\') -ieq $dir.TrimEnd('\\')) { "
+        "        $items = $w.Document.Folder.Items(); "
+        "        $it = $items.Item($name); "
+        "        if ($it) { $w.Document.SelectItem($it, 17); $found = $true; break; } "
+        "      } "
+        "    } "
+        "  } catch {} "
+        "}; "
+        "if (-not $found) { & explorer.exe /select,$p }"
     )
     try:
         subprocess.run(
             ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_cmd],
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000),
             timeout=5,
+            env={**os.environ, "MEDIADOCK_TARGET": str(target)},
         )
         return True
     except Exception:

@@ -8,21 +8,14 @@ build/
 installer/
 *.exe
 
-data/*.db
-data/*.sqlite
-data/*.sqlite-wal
-data/*.sqlite-shm
-data/auth_browser.txt
+# Kullanıcıya ait veriler (geçmiş, günlükler, küçük resimler) depoya girmemeli
+data/
+assets/thumbnails/
 
 .vscode/
 .idea/
 *.swp
 *.part*
-data/ytdlp_pkg/
-data/ytdlp_pkg.old/
-data/ytdlp_pkg.bad/
-data/ytdlp_last_check.txt
-data/logs/
 
 release/
 .pytest_cache/

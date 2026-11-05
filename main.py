@@ -54,10 +54,22 @@ def _install_excepthooks() -> None:
         pass
 
 
+def _cleanup_temp_thumbnails() -> None:
+    # Yarım kalan küçük resim indirmeleri (tmp_*.dat) birikmesin.
+    from config.paths import THUMBNAILS_DIR
+
+    try:
+        for leftover in THUMBNAILS_DIR.glob("tmp_*.dat"):
+            leftover.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
 def main() -> int:
     _configure_windows_app_id()
     ensure_app_directories()
     _install_excepthooks()
+    _cleanup_temp_thumbnails()
     log_event(f"MediaDock {APP_VERSION} başlatıldı.")
     if is_frozen():
         # Önceki delta güncellemeden kalan .old dosyalarını temizle.

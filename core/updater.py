@@ -23,6 +23,23 @@ from core.logutil import log_event
 ASSET_MANIFEST = "manifest.json"
 ASSET_ZIP = "mediadock-app.zip"
 ASSET_SUMS = "sha256sums.txt"
+
+_REPO_SLUG_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+_GITHUB_ASSET_SUFFIXES = (".github.com", ".githubusercontent.com")
+
+
+def _is_trusted_asset_url(url: str, api_host: str) -> bool:
+    """İndirme adresi https olmalı; GitHub alan adlarından veya güncelleme kaynağıyla aynı sunucudan gelmeli."""
+    from urllib.parse import urlparse
+
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return False
+    host = (parsed.hostname or "").lower()
+    if parsed.scheme != "https" or not host:
+        return False
+    return host == "github.com" or host == api_host or host.endswith(_GITHUB_ASSET_SUFFIXES)
 # Sihirbazsız (sessiz) kurulum: kullanıcı yalnızca ilerleme çubuğunu görür.
 INSTALLER_ARGS = ["/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS"]
 
@@ -67,8 +84,13 @@ def check_for_updates(repo_or_url: str, current_version: str = APP_VERSION) -> U
         url = target
     else:
         clean_slug = target.strip("/").replace("https://github.com/", "").replace("http://github.com/", "")
+        if not _REPO_SLUG_RE.match(clean_slug):
+            raise ValueError("Güncelleme deposu 'sahip/depo' biçiminde olmalı.")
         url = f"https://api.github.com/repos/{clean_slug}/releases/latest"
 
+    from urllib.parse import urlparse
+
+    api_host = (urlparse(url).hostname or "").lower()
     resp = requests.get(url, headers=headers, timeout=10)
     if resp.status_code == 404:
         return UpdateInfo(
@@ -119,6 +141,16 @@ def check_for_updates(repo_or_url: str, current_version: str = APP_VERSION) -> U
                 asset_size = int(a.get("size") or 0)
                 if "setup" in name.lower():
                     break
+
+    # Güvenilmeyen sunucuya işaret eden indirme adreslerini at (yalnızca https + GitHub / kaynak sunucu).
+    if dl_url and not _is_trusted_asset_url(dl_url, api_host):
+        dl_url, asset_name, asset_size = "", "", 0
+    if manifest_url and not _is_trusted_asset_url(manifest_url, api_host):
+        manifest_url = ""
+    if app_zip_url and not _is_trusted_asset_url(app_zip_url, api_host):
+        app_zip_url = ""
+    if sums_url and not _is_trusted_asset_url(sums_url, api_host):
+        sums_url = ""
 
     if not asset_name and dl_url:
         asset_name = Path(dl_url.split("?")[0]).name or "MediaDock-Setup.exe"

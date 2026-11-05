@@ -229,8 +229,14 @@ class HomePage(QWidget):
         self.err_retry_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.err_retry_btn.clicked.connect(lambda: self._trigger_fetch(force=True))
 
+        self.err_copy_btn = QPushButton("Ayrıntıları Kopyala")
+        self.err_copy_btn.setObjectName("SecondaryButton")
+        self.err_copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.err_copy_btn.clicked.connect(self._copy_error_details)
+
         err_layout.addWidget(self.err_icon, 0, Qt.AlignmentFlag.AlignTop)
         err_layout.addWidget(self.err_lbl, 1)
+        err_layout.addWidget(self.err_copy_btn, 0, Qt.AlignmentFlag.AlignVCenter)
         err_layout.addWidget(self.err_retry_btn, 0, Qt.AlignmentFlag.AlignVCenter)
         c_layout.addWidget(self.error_card)
 
@@ -546,6 +552,13 @@ class HomePage(QWidget):
         self.preview_card.hide()
         self.platforms_hint_panel.hide()
         self.loading_card.show()
+
+    def _copy_error_details(self) -> None:
+        from core.logutil import build_report
+
+        QApplication.clipboard().setText(build_report({"Gösterilen hata": self.err_lbl.text()}))
+        self.err_copy_btn.setText("Kopyalandı")
+        QTimer.singleShot(1800, lambda: self.err_copy_btn.setText("Ayrıntıları Kopyala"))
 
     def _on_meta_error(self, message: str) -> None:
         self.loading_card.hide()

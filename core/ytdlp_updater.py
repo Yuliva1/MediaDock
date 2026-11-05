@@ -24,6 +24,8 @@ _STAMP_FILE: Path = DATA_DIR / "ytdlp_last_check.txt"
 PYPI_JSON_URL = "https://pypi.org/pypi/yt-dlp/json"
 CHECK_INTERVAL_SECONDS = 24 * 3600
 MAX_WHEEL_BYTES = 40 * 1024 * 1024
+MAX_UNPACKED_BYTES = 200 * 1024 * 1024
+WHEEL_HOST = "files.pythonhosted.org"
 
 _VERSION_RE = re.compile(r"""__version__\s*=\s*['"]([^'"]+)['"]""")
 _work_lock = threading.Lock()
@@ -155,6 +157,13 @@ def check_latest() -> tuple[bool, str, str]:
 
 
 def _download_wheel(url: str, expected_sha256: str, dest: Path) -> None:
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+    if parsed.scheme != "https" or (parsed.hostname or "").lower() != WHEEL_HOST:
+        raise RuntimeError("Paket adresi beklenen PyPI sunucusundan değil; işlem durduruldu.")
+    if not expected_sha256:
+        raise RuntimeError("Paket için doğrulama özeti (SHA-256) bulunamadı; işlem durduruldu.")
     sha = hashlib.sha256()
     size = 0
     with requests.get(url, stream=True, timeout=30) as resp:
@@ -168,12 +177,14 @@ def _download_wheel(url: str, expected_sha256: str, dest: Path) -> None:
                     raise RuntimeError("İndirilen paket beklenenden büyük; işlem durduruldu.")
                 sha.update(chunk)
                 fh.write(chunk)
-    if expected_sha256 and sha.hexdigest().lower() != expected_sha256.lower():
+    if sha.hexdigest().lower() != expected_sha256.lower():
         raise RuntimeError("İndirilen paketin doğrulama özeti (SHA-256) eşleşmedi.")
 
 
 def _extract_package(wheel_path: Path, target_root: Path) -> None:
     with zipfile.ZipFile(wheel_path) as zf:
+        if sum(i.file_size for i in zf.infolist()) > MAX_UNPACKED_BYTES:
+            raise RuntimeError("Paket açıldığında beklenenden çok büyük; işlem durduruldu.")
         for info in zf.infolist():
             parts = Path(info.filename).parts
             if not parts or parts[0] != "yt_dlp" or info.is_dir():
