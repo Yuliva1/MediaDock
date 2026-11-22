@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 
 from config.constants import IMAGE_FORMATS, resolve_platform_info
 from config.theme import ThemePalette, get_theme
+from core import threads
 from core.metadata import GalleryItem, VideoMetadata, cache_thumbnail, format_duration
 from ui.icons import get_icon
 from ui.widgets.custom_widgets import PlatformBadge
@@ -309,7 +310,7 @@ class GalleryDialog(QDialog):
         self._update_counter()
 
     def _start_async_thumbnail_loading(self) -> None:
-        thread = QThread(self)
+        thread = threads.track(QThread(self))
         worker = _ThumbWorker(self.items)
         worker.moveToThread(thread)
 

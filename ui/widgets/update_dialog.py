@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QSize, Qt, QThread
+from PySide6.QtCore import QSize, Qt, QThread, QTimer, Signal
 from PySide6.QtWidgets import (
     QDialog,
     QFrame,
@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 
 from config.theme import ThemePalette, get_theme
 from core.metadata import format_bytes
+from core import threads
 from core.updater import UpdateDownloadWorker, UpdateInfo, finalize_update
 from ui.icons import get_icon, get_pixmap
 from ui.widgets.custom_widgets import SmoothProgressBar
@@ -21,9 +22,21 @@ from ui.widgets.custom_widgets import SmoothProgressBar
 
 class UpdateDialog(QDialog):
 
-    def __init__(self, info: UpdateInfo, palette: ThemePalette | None = None, parent: QWidget | None = None) -> None:
+    skip_version_requested = Signal(str)
+
+    def __init__(
+        self,
+        info: UpdateInfo,
+        palette: ThemePalette | None = None,
+        parent: QWidget | None = None,
+        allow_skip: bool = False,
+    ) -> None:
         super().__init__(parent)
         self.info = info
+        self._allow_skip = allow_skip
+        self._apply_timer = QTimer(self)
+        self._apply_timer.setSingleShot(True)
+        self._apply_timer.timeout.connect(self._apply_pending)
         self._palette = palette or get_theme()
         self._thread: QThread | None = None
         self._worker: UpdateDownloadWorker | None = None
@@ -145,7 +158,7 @@ class UpdateDialog(QDialog):
         pp_top.addWidget(self.prog_pct_lbl)
         pp_layout.addLayout(pp_top)
 
-        self.progress_bar = SmoothProgressBar(self.progress_panel)
+        self.progress_bar = SmoothProgressBar(self._palette, self.progress_panel)
         self.progress_bar.setFixedHeight(6)
         pp_layout.addWidget(self.progress_bar)
 
@@ -163,6 +176,13 @@ class UpdateDialog(QDialog):
 
         btn_row = QHBoxLayout()
         btn_row.setSpacing(10)
+
+        self.skip_btn = QPushButton("Bu Sürümü Atla")
+        self.skip_btn.setObjectName("SecondaryButton")
+        self.skip_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.skip_btn.clicked.connect(self._on_skip_clicked)
+        self.skip_btn.setVisible(self._allow_skip)
+        btn_row.addWidget(self.skip_btn)
         btn_row.addStretch()
 
         self.later_btn = QPushButton("Daha Sonra")
@@ -182,6 +202,7 @@ class UpdateDialog(QDialog):
         root.addLayout(btn_row)
 
     def _start_download(self) -> None:
+        self._apply_timer.stop()
         if self._downloaded_path:
             self._apply_update(self._downloaded_path)
             return
@@ -197,8 +218,9 @@ class UpdateDialog(QDialog):
         self.update_btn.setEnabled(False)
         self.update_btn.setText("İndiriliyor...")
         self.progress_panel.show()
+        self.skip_btn.hide()
 
-        thread = QThread(self)
+        thread = threads.track(QThread(self))
         worker = UpdateDownloadWorker(self.info.download_url, self.info.asset_name, self.info)
         worker.moveToThread(thread)
 
@@ -239,8 +261,12 @@ class UpdateDialog(QDialog):
         self.later_btn.setEnabled(True)
         self.later_btn.setText("Kapat")
 
-        from PySide6.QtCore import QTimer
-        QTimer.singleShot(600, lambda: self._apply_update(downloaded_path))
+        # Kısa bir gecikmeyle uygulanır; bu sürede "Kapat" denirse iptal edilir.
+        self._apply_timer.start(900)
+
+    def _apply_pending(self) -> None:
+        if self._downloaded_path and self.isVisible():
+            self._apply_update(self._downloaded_path)
 
     def _apply_update(self, path: str) -> None:
         try:
@@ -268,9 +294,20 @@ class UpdateDialog(QDialog):
             self._thread.wait(1200)
 
     def _on_later_clicked(self) -> None:
+        self._apply_timer.stop()
         self._cleanup_worker_thread()
         self.reject()
 
+    def _on_skip_clicked(self) -> None:
+        self.skip_version_requested.emit(self.info.latest_version)
+        self._on_later_clicked()
+
+    def reject(self) -> None:
+        self._apply_timer.stop()
+        self._cleanup_worker_thread()
+        super().reject()
+
     def closeEvent(self, event) -> None:
+        self._apply_timer.stop()
         self._cleanup_worker_thread()
         super().closeEvent(event)

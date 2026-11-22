@@ -3,7 +3,10 @@ from __future__ import annotations
 
 import ctypes
 import faulthandler
+import logging
+import os
 import sys
+import time
 import threading
 
 from PySide6.QtCore import Qt, QTimer
@@ -12,9 +15,9 @@ from PySide6.QtWidgets import QApplication
 from config.constants import APP_NAME, APP_ORGANIZATION, APP_VERSION
 from config.paths import ensure_app_directories, is_frozen
 from config.settings import SettingsManager
-from core import delta_update
+from core import delta_update, threads
 from core.database import DatabaseManager
-from core.extractor import set_cookies_enabled
+from core.extractor import set_cookies_enabled, set_instagram_cookies_allowed
 from core.ffmpeg import FFmpegManager
 from core.logutil import LOG_DIR, log_event, log_exception
 from core.ytdlp_updater import YtDlpAutoUpdater, activate_override
@@ -49,7 +52,12 @@ def _install_excepthooks() -> None:
     # Qt/C++ tarafındaki çökmeler için: Python yığınını crash.log'a yazar.
     try:
         LOG_DIR.mkdir(parents=True, exist_ok=True)
-        faulthandler.enable(open(LOG_DIR / "crash.log", "a", encoding="utf-8"))
+        crash_fh = open(LOG_DIR / "crash.log", "a", encoding="utf-8")
+        # Her oturumun başına sürüm/saat yazılır; çökme hangi sürümde oldu anlaşılsın.
+        stamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        crash_fh.write(f"\n--- MediaDock {APP_VERSION} oturumu {stamp} (pid {os.getpid()}) ---\n")
+        crash_fh.flush()
+        faulthandler.enable(crash_fh)
     except Exception:
         pass
 
@@ -88,10 +96,12 @@ def main() -> int:
 
     db = DatabaseManager()
     settings = SettingsManager(db)
-    set_cookies_enabled(settings.data.use_browser_cookies)
-    settings.settings_changed.connect(
-        lambda: set_cookies_enabled(settings.data.use_browser_cookies)
-    )
+    def _apply_cookie_policy() -> None:
+        set_cookies_enabled(settings.data.use_browser_cookies)
+        set_instagram_cookies_allowed(settings.data.instagram_cookies_opt_in)
+
+    _apply_cookie_policy()
+    settings.settings_changed.connect(_apply_cookie_policy)
     ffmpeg_mgr = FFmpegManager(settings.data.ffmpeg_custom_path)
 
     window = MainWindow(db=db, settings=settings, ffmpeg_mgr=ffmpeg_mgr)
@@ -105,7 +115,23 @@ def main() -> int:
     else:
         QTimer.singleShot(6000, engine_updater.start)
 
-    return app.exec()
+    code = app.exec()
+    return _finish(code)
+
+
+def _finish(code: int) -> int:
+    """Arka plan işlerini kısa süre bekler; bitmeyen varsa Qt'nin abort()'una düşmeden çıkar."""
+    if threads.wait_all(3000):
+        return code
+    log_event(f"Kapanışta {len(threads.running())} arka plan işi bitmedi; uygulama doğrudan sonlandırılıyor.")
+    logging.shutdown()
+    try:
+        sys.stdout.flush()
+        sys.stderr.flush()
+    except Exception:
+        pass
+    # Çalışan QThread nesneleri Python kapanışında yok edilirse Qt süreci abort() eder.
+    os._exit(code)
 
 
 if __name__ == "__main__":

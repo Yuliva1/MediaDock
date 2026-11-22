@@ -358,8 +358,11 @@ def _quit_app() -> None:
 
     app = QApplication.instance()
     if app:
+        # Sistem tepsisine küçültme açık olsa bile güncelleme için gerçekten kapan.
+        app.setProperty("mediadock_force_quit", True)
+        for w in app.topLevelWidgets():
+            w.close()
         app.quit()
-    sys.exit(0)
 
 
 def apply_delta_and_restart(staging_dir: str) -> None:

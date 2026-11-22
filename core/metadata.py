@@ -19,6 +19,7 @@ from config.constants import (
     resolve_platform_info,
 )
 from config.paths import THUMBNAILS_DIR
+from core import smart_resolve, threads, x_photos
 from core.extractor import cookies_enabled, extract
 from core.logutil import log_extraction_error
 
@@ -332,15 +333,13 @@ def translate_ytdlp_error(err: Exception | str) -> str:
     ):
         return (
             "Instagram bu içeriği oturum açmadan sunmuyor veya istekleri geçici olarak sınırladı. "
-            "Gönderi özel ya da giriş gerektiriyorsa, hesap güvenliği için çerez kullanımı kapalı olduğundan indirilemez. "
-            "Bir süre bekleyip tekrar deneyin."
+            "Gönderi özel ya da giriş gerektiriyorsa (hikaye, özel hesap) Ayarlar'dan Instagram çerez iznini açmanız gerekir. "
+            "Herkese açık gönderilerde birkaç dakika bekleyip tekrar deneyin."
         )
-    if "instagram" in lower and NO_VIDEO_MARKER in lower:
+    if "instagram" in lower and (NO_VIDEO_MARKER in lower or "there is no video in this post" in lower):
         return (
-            "Bu Instagram gönderisinde indirilebilir video yok; görsel gönderisi veya görsel içeren çoklu paylaşım olabilir. "
-            "İndirme motoru (yt-dlp) Instagram görsellerini desteklemiyor, bu yüzden güncellemek sorunu çözmez. "
-            "Videolar ve Reels indirilebilir. Görsel için tarayıcıda sağ tıklayıp 'Resim adresini kopyala' ile "
-            "aldığınız bağlantıyı MediaDock'a yapıştırabilirsiniz."
+            "Bu Instagram gönderisindeki medya alınamadı. Gönderi kaldırılmış ya da geçici olarak erişilemiyor olabilir; "
+            "bir süre sonra tekrar deneyin. Sorun sürerse Ayarlar > İndirme Motorları'ndan yt-dlp'yi güncelleyin."
         )
     if NO_VIDEO_MARKER in lower and not _looks_like_extractor_failure(lower):
         return "Bu bağlantıda indirilebilir bir video biçimi bulunamadı. İçerik görsel ya da yalnızca oturumla erişilen bir içerik olabilir."
@@ -534,12 +533,117 @@ def _refresh_engine_if_broken(exc: Exception) -> None:
         pass
 
 
+_GENERIC_TITLE_RE = re.compile(r"^(?:Video|Post|Photo|Reel)s? by (.+)$", re.IGNORECASE)
+
+
+def _friendly_title(info: dict[str, Any]) -> str:
+    """Instagram gibi sitelerin "Video by kullanıcı" başlıklarını açıklamayla zenginleştirir."""
+    title = str(info.get("title") or "").strip()
+    m = _GENERIC_TITLE_RE.match(title)
+    if not m:
+        return ""
+    who = str(info.get("channel") or info.get("uploader_id") or m.group(1)).strip()
+    caption = str(info.get("description") or "").strip()
+    first = next((ln.strip() for ln in caption.splitlines() if ln.strip()), "")
+    first = re.sub(r"\s+", " ", first)
+    if len(first) > 80:
+        first = first[:77].rstrip() + "..."
+    return f"{who} - {first}" if first else f"{who} gönderisi"
+
+
+def _x_post_metadata(url: str, post: Any) -> VideoMetadata:
+    """Fotoğraf içeren X gönderisini tek görsel ya da galeri olarak döndürür."""
+    platform_name, platform_color = resolve_platform_info("Twitter", url)
+    first = next((ln.strip() for ln in post.text.splitlines() if ln.strip()), "")
+    if len(first) > 80:
+        first = first[:77].rstrip() + "..."
+    who = post.author or "X"
+    base_title = f"{who} - {first}" if first else f"{who} gönderisi"
+    clean_url, _ = smart_resolve.split_item(url)
+
+    items: list[GalleryItem] = []
+    for idx, m in enumerate(post.media, 1):
+        if m.kind == "image":
+            item_url = m.url
+            ext = Path(urlparse(m.thumbnail_url).path).suffix.lstrip(".").lower() or "jpg"
+        else:
+            item_url = smart_resolve.with_item(clean_url, m.video_index)
+            ext = "mp4"
+        items.append(
+            GalleryItem(
+                index=idx,
+                url=item_url,
+                thumbnail_url=m.thumbnail_url,
+                media_type=m.kind,
+                title=f"{base_title} - {idx:02d}" if len(post.media) > 1 else base_title,
+                width=m.width,
+                height=m.height,
+                ext=ext,
+                selected=True,
+            )
+        )
+
+    cached = cache_thumbnail(items[0].thumbnail_url, f"{platform_name}_{post.tweet_id}")
+    if len(items) == 1:
+        it = items[0]
+        return VideoMetadata(
+            url=it.url,
+            webpage_url=clean_url,
+            video_id=post.tweet_id,
+            title=base_title,
+            uploader=who,
+            duration=0.0,
+            platform=platform_name,
+            platform_color=platform_color,
+            extractor="x_photos",
+            thumbnail_url=it.thumbnail_url,
+            thumbnail_path=cached,
+            has_video=False,
+            has_audio=False,
+            available_heights=set(),
+            available_containers=set(IMAGE_FORMATS),
+            media_type="image",
+            image_width=it.width,
+            image_height=it.height,
+        )
+    return VideoMetadata(
+        url=clean_url,
+        webpage_url=clean_url,
+        video_id=post.tweet_id,
+        title=base_title,
+        uploader=who,
+        duration=0.0,
+        platform=platform_name,
+        platform_color=platform_color,
+        extractor="x_photos",
+        thumbnail_url=items[0].thumbnail_url,
+        thumbnail_path=cached,
+        has_video=any(i.media_type == "video" for i in items),
+        has_audio=any(i.media_type == "video" for i in items),
+        available_heights=set(),
+        available_containers=set(IMAGE_FORMATS) | {"MP4"},
+        max_height=max((i.height for i in items), default=0),
+        media_type="gallery",
+        is_gallery=True,
+        gallery_items=items,
+    )
+
+
 def fetch_video_metadata(url: str, ffmpeg_location: str | None = None) -> VideoMetadata:
     if is_direct_image_url(url):
         try:
             return fetch_image_metadata(url)
         except Exception:
             pass
+
+    # X: yt-dlp fotoğrafları döndürmez; fotoğraf varsa gönderiyi kendimiz çözeriz.
+    if x_photos.tweet_id_from_url(url):
+        try:
+            post = x_photos.fetch_post(url)
+            if post and post.has_photos:
+                return _x_post_metadata(url, post)
+        except Exception as exc:
+            log_extraction_error(url, exc)
 
     try:
         probe = requests.head(
@@ -567,13 +671,25 @@ def fetch_video_metadata(url: str, ffmpeg_location: str | None = None) -> VideoM
 
     info: dict[str, Any] | None = None
     last_error: Exception | None = None
+    image_mode = False
     try:
         info = extract(url, ydl_opts)
     except Exception as exc:
         last_error = exc
         info = None
-        log_extraction_error(url, exc)
-        _refresh_engine_if_broken(exc)
+        if smart_resolve.is_no_video_error(exc):
+            # Video yok ama gönderi çözüldü (fotoğraf / fotoğraflı carousel):
+            # aynı isteği "biçim yok" hatasını yok sayarak tekrarla, görselleri al.
+            try:
+                info = extract(url, {**ydl_opts, "ignore_no_formats_error": True})
+                image_mode = True
+                last_error = None
+            except Exception as exc2:
+                last_error = exc2
+                info = None
+        if info is None and last_error is not None:
+            log_extraction_error(url, last_error)
+            _refresh_engine_if_broken(last_error)
 
     if not info:
         scraped_items = scrape_webpage_gallery(url)
@@ -613,7 +729,7 @@ def fetch_video_metadata(url: str, ffmpeg_location: str | None = None) -> VideoM
     platform_name, platform_color = resolve_platform_info(extractor, webpage_url)
 
     if len(entries) > 1:
-        base_title = str(info.get("title") or info.get("description") or "Çoklu Paylaşım").splitlines()[0].strip()
+        base_title = _friendly_title(info) or str(info.get("title") or info.get("description") or "Çoklu Paylaşım").splitlines()[0].strip()
         if len(base_title) > 120:
             base_title = base_title[:117] + "..."
         uploader = str(info.get("uploader") or info.get("channel") or platform_name)
@@ -621,29 +737,20 @@ def fetch_video_metadata(url: str, ffmpeg_location: str | None = None) -> VideoM
 
         gallery_items: list[GalleryItem] = []
         for idx, entry in enumerate(entries, 1):
-            e_url = str(entry.get("url") or entry.get("webpage_url") or url)
-            fmts = entry.get("formats") or []
-            if fmts:
-                best = fmts[-1]
-                e_url = str(best.get("url") or e_url)
-
-            t_url = str(entry.get("thumbnail") or "")
-            if not t_url and entry.get("thumbnails"):
-                t_cands = [t.get("url") for t in entry["thumbnails"] if t.get("url")]
-                if t_cands:
-                    t_url = str(t_cands[-1])
-
-            raw_vcodec = entry.get("vcodec")
-            dur = float(entry.get("duration") or 0.0)
-            fmt_ext = str(entry.get("ext") or "").lower()
-            is_vid = (raw_vcodec != "none" and raw_vcodec is not None) or dur > 0 or fmt_ext in ("mp4", "webm", "mkv", "mov")
+            # Süresi dolan CDN adresi yerine "gönderi + öğe sırası" saklanır;
+            # gerçek adres indirme anında yeniden çözülür (core/smart_resolve.py).
+            e_url = smart_resolve.with_item(webpage_url, idx)
+            is_vid = smart_resolve.entry_has_video(entry)
             m_type = "video" if is_vid else "image"
+            dur = float(entry.get("duration") or 0.0)
+            img_url, img_w, img_h = smart_resolve.best_image(entry)
 
-            if not t_url and not is_vid:
-                t_url = e_url
-
-            w = int(entry.get("width") or 0)
-            h = int(entry.get("height") or 0)
+            t_url = str(entry.get("thumbnail") or "") or img_url
+            w = int(entry.get("width") or 0) or img_w
+            h = int(entry.get("height") or 0) or img_h
+            fmt_ext = "mp4" if is_vid else (Path(urlparse(img_url).path).suffix.lstrip(".").lower() or "jpg")
+            if fmt_ext not in smart_resolve.IMAGE_EXTS | smart_resolve.VIDEO_EXTS:
+                fmt_ext = "mp4" if is_vid else "jpg"
             item_title = f"{base_title} - {idx:02d}"
 
             gallery_items.append(
@@ -734,17 +841,26 @@ def fetch_video_metadata(url: str, ffmpeg_location: str | None = None) -> VideoM
             has_audio = True
 
     is_pure_image = (not has_video) and (not has_audio) and (top_ext in SUPPORTED_IMAGE_EXTENSIONS or "image" in extractor.lower())
+    if image_mode and not formats:
+        # Fotoğraf gönderisi: video yok, görsel var.
+        is_pure_image = True
+        has_video = False
+        has_audio = False
 
     thumb_url = str(info.get("thumbnail") or "")
     if not thumb_url and info.get("thumbnails"):
         thumbs = [t.get("url") for t in info["thumbnails"] if t.get("url")]
         if thumbs:
             thumb_url = str(thumbs[-1])
+    image_w = image_h = 0
+    if image_mode and not formats:
+        best_url, image_w, image_h = smart_resolve.best_image(info)
+        thumb_url = best_url or thumb_url
 
     video_id = str(info.get("id") or hashlib.md5(webpage_url.encode("utf-8")).hexdigest()[:10])
     cached_thumb = cache_thumbnail(thumb_url, f"{platform_name}_{video_id}")
 
-    title = str(info.get("title") or info.get("description") or "Adsız Medya").splitlines()[0].strip()
+    title = _friendly_title(info) or str(info.get("title") or info.get("description") or "Adsız Medya").splitlines()[0].strip()
     if len(title) > 160:
         title = title[:157] + "..."
 
@@ -785,6 +901,8 @@ def fetch_video_metadata(url: str, ffmpeg_location: str | None = None) -> VideoM
         max_height=max_height,
         is_live=is_live,
         media_type=media_type,
+        image_width=image_w,
+        image_height=image_h,
     )
 
 
@@ -826,7 +944,7 @@ class MetadataController(QObject):
         req_id = self._request_seq
         self.loading_started.emit(clean_url)
 
-        thread = QThread()
+        thread = threads.track(QThread())
         worker = MetadataFetchWorker(clean_url, self._get_ffmpeg_loc())
         worker.moveToThread(thread)
 

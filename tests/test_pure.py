@@ -44,7 +44,8 @@ IG_NO_FORMATS = (
 
 def test_instagram_no_video_formats_is_not_blamed_on_engine():
     msg = translate_ytdlp_error(IG_NO_FORMATS)
-    assert "Instagram" in msg and "yt-dlp" in msg and "güncellemek sorunu çözmez" in msg
+    # Artık fotoğraf gönderileri de çözülüyor; bu mesaj motoru suçlamamalı.
+    assert "Instagram" in msg
     assert "güncel değil" not in msg
 
 

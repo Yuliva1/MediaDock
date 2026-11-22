@@ -29,6 +29,7 @@ from core.downloader import reveal_in_explorer
 from core.ffmpeg import FFmpegManager
 from core.logutil import LOG_DIR, LOG_FILE, build_report
 from core.scanner import LibraryScanner, YtDlpUpdater
+from core import threads
 from core.updater import UpdateCheckWorker, UpdateInfo
 from ui.icons import get_icon
 from ui.widgets.custom_widgets import ToggleSwitch
@@ -151,7 +152,7 @@ class SettingsPage(QWidget):
         up_col.setSpacing(8)
         u_info_lbl = QLabel(f"MediaDock v{APP_VERSION}  ·  Geliştirici / Sahibi: {APP_AUTHOR}")
         u_info_lbl.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {self._palette.accent};")
-        u_desc_lbl = QLabel("Uygulama her açılışta arka planda GitHub Releases üzerinden güncellemeleri otomatik denetler.")
+        u_desc_lbl = QLabel("Yeni sürümler GitHub Releases üzerinden denetlenir; genellikle yalnızca değişen dosyalar indirilir.")
         u_desc_lbl.setObjectName("MutedText")
         up_col.addWidget(u_info_lbl)
         up_col.addWidget(u_desc_lbl)
@@ -179,6 +180,16 @@ class SettingsPage(QWidget):
 
         up_col.addLayout(btn_row)
         update_card.add_custom(up_col)
+
+        self.auto_update_toggle = self._make_toggle(True)
+        self.auto_update_toggle.toggled.connect(
+            lambda v: self._settings.update(auto_check_updates=v)
+        )
+        update_card.add_row(
+            "Açılışta Güncellemeleri Denetle",
+            "Kapalıysa güncellemeler yalnızca yukarıdaki düğmeyle elle denetlenir.",
+            self.auto_update_toggle,
+        )
         root.addWidget(update_card)
 
         storage_card = _SettingsCard("Depolama ve Medya Kütüphanesi")
@@ -345,6 +356,14 @@ class SettingsPage(QWidget):
             self.open_complete_toggle,
         )
 
+        self.tray_toggle = self._make_toggle(False)
+        self.tray_toggle.toggled.connect(lambda v: self._settings.update(close_to_tray=v))
+        system_card.add_row(
+            "Kapatınca Sistem Tepsisine Küçült",
+            "Pencereyi kapattığınızda MediaDock arka planda çalışmaya ve indirmeye devam eder.",
+            self.tray_toggle,
+        )
+
         self.startup_toggle = self._make_toggle(False)
         self.startup_toggle.toggled.connect(self._on_startup_toggled)
         system_card.add_row(
@@ -444,8 +463,20 @@ class SettingsPage(QWidget):
         engine_card.add_row(
             "Tarayıcı Çerezlerini Kullan",
             "Giriş gerektiren sitelerde tarayıcınızdaki oturumu denemeye izin verir. "
-            "Varsayılan olarak kapalıdır. Instagram için bu özellik hesap güvenliği nedeniyle her zaman devre dışıdır.",
+            "Varsayılan olarak kapalıdır. Instagram aşağıdaki ayrı izin açılmadıkça bu özelliğe dahil edilmez.",
             self.cookies_toggle,
+        )
+
+        self.ig_cookies_toggle = self._make_toggle(False)
+        self.ig_cookies_toggle.toggled.connect(
+            lambda v: self._settings.update(instagram_cookies_opt_in=v)
+        )
+        engine_card.add_row(
+            "Instagram'da da Çerez Kullan (riskli)",
+            "Yalnızca hikayeler, özel hesaplar gibi giriş isteyen içerikler için gerekir; herkese açık gönderiler "
+            "ve fotoğraflar çerezsiz iner. Instagram otomatik erişimi fark ederse hesabı kısıtlayabilir: "
+            "ana hesabınız yerine yedek bir hesapla giriş yapılmış tarayıcı kullanın. Üstteki ayar da açık olmalıdır.",
+            self.ig_cookies_toggle,
         )
         root.addWidget(engine_card)
 
@@ -485,6 +516,9 @@ class SettingsPage(QWidget):
         self.open_complete_toggle.setChecked(d.open_folder_on_complete, emit_signal=False)
         self.startup_toggle.setChecked(d.launch_on_startup, emit_signal=False)
         self.cookies_toggle.setChecked(d.use_browser_cookies, emit_signal=False)
+        self.auto_update_toggle.setChecked(d.auto_check_updates, emit_signal=False)
+        self.ig_cookies_toggle.setChecked(d.instagram_cookies_opt_in, emit_signal=False)
+        self.tray_toggle.setChecked(d.close_to_tray, emit_signal=False)
 
         self.ffmpeg_input.setText(d.ffmpeg_custom_path)
         self.refresh_dependency_labels()
@@ -542,7 +576,7 @@ class SettingsPage(QWidget):
 
         repo = self._settings.data.update_repo or DEFAULT_UPDATE_REPO
 
-        thread = QThread(self)
+        thread = threads.track(QThread(self))
         worker = UpdateCheckWorker(repo, APP_VERSION)
         worker.moveToThread(thread)
         self._check_update_thread = thread

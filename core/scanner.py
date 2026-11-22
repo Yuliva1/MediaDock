@@ -9,6 +9,7 @@ from PySide6.QtCore import QObject, QThread, Signal
 
 from config.constants import SUPPORTED_AUDIO_EXTENSIONS, SUPPORTED_MEDIA_EXTENSIONS
 from config.paths import THUMBNAILS_DIR
+from core import threads
 from core.database import DatabaseManager
 from core import ytdlp_updater
 from core.ffmpeg import FFmpegManager
@@ -117,7 +118,7 @@ class LibraryScanner(QObject):
             return
 
         self.scan_started.emit()
-        thread = QThread()
+        thread = threads.track(QThread())
         worker = _FolderScanWorker(folder, self._db, self._ffmpeg)
         worker.moveToThread(thread)
 
@@ -177,7 +178,7 @@ class YtDlpUpdater(QObject):
     def check_or_upgrade(self, do_upgrade: bool = False) -> None:
         if self._thread is not None and self._thread.isRunning():
             return
-        thread = QThread()
+        thread = threads.track(QThread())
         worker = _YtDlpUpdateWorker(do_upgrade=do_upgrade)
         worker.moveToThread(thread)
 

@@ -15,9 +15,10 @@ from PySide6.QtCore import QObject, QThread, Signal
 
 from config.constants import SUPPORTED_MEDIA_EXTENSIONS, resolve_platform_info
 from config.settings import SettingsManager
+from core import smart_resolve, threads
 from core.database import DatabaseManager, now_iso
 from core.extractor import extract
-from core.logutil import log_extraction_error
+from core.logutil import log_event, log_extraction_error
 from core.ffmpeg import FFmpegCancelledError, FFmpegManager
 from core.metadata import (
     GalleryItem,
@@ -25,6 +26,7 @@ from core.metadata import (
     VideoMetadata,
     cache_thumbnail,
     fetch_video_metadata,
+    is_direct_image_url,
     sanitize_filename,
     translate_ytdlp_error,
 )
@@ -122,6 +124,8 @@ class _DownloadWorker(QObject):
     paused = Signal(str)
     cancelled = Signal(str)
     failed = Signal(str, str)
+    # Toplu eklenen bağlantı bir galeri (carousel) çıktı: görev, öğelerine bölünür.
+    gallery_expanded = Signal(str, object)
 
     def __init__(
         self,
@@ -144,14 +148,54 @@ class _DownloadWorker(QObject):
         if self.pause_event.is_set():
             raise _TaskPausedException()
 
+    def _resolve_image_source(self, url: str) -> tuple[str, dict[str, str]]:
+        """Gönderi adresini (ve varsa öğe sırasını) gerçek görsel adresine çevirir."""
+        src, idx = smart_resolve.split_item(url)
+        if idx is None and is_direct_image_url(src):
+            return src, {}
+        opts: dict[str, Any] = {
+            "quiet": True,
+            "no_warnings": True,
+            "skip_download": True,
+            "socket_timeout": 15,
+            "ignore_no_formats_error": True,
+            "noplaylist": idx is None,
+        }
+        if idx is not None:
+            opts["playlist_items"] = str(idx)
+        try:
+            info = extract(src, opts)
+        except Exception:
+            if idx is None:
+                return src, {}  # kazınmış galeri görseli olabilir; doğrudan dene
+            raise
+        if not info:
+            return src, {}
+        entries = [e for e in (info.get("entries") or []) if e]
+        entry = entries[0] if entries else info
+        img_url, _, _ = smart_resolve.best_image(entry)
+        headers = {k: str(v) for k, v in (entry.get("http_headers") or info.get("http_headers") or {}).items()
+                   if k.lower() in ("referer", "user-agent")}
+        return (img_url or src), headers
+
     def _download_image_direct(self, task_id: str, url: str, out_dir: Path, file_stem: str, target_fmt: str) -> None:
+        self.progress_changed.emit(
+            task_id,
+            {"status": "downloading", "status_text": "Görsel hazırlanıyor...", "progress": 5.0},
+        )
+        url, extra_headers = self._resolve_image_source(url)
+        self._check_interrupt()
         self.progress_changed.emit(
             task_id,
             {"status": "downloading", "status_text": "Görsel indiriliyor...", "progress": 10.0},
         )
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36", **extra_headers}
         resp = requests.get(url, stream=True, timeout=25, headers=headers)
         resp.raise_for_status()
+        ctype = resp.headers.get("Content-Type", "").lower()
+        if "text/html" in ctype or "application/json" in ctype:
+            resp.close()
+            raise MediaInfoError("Bu bağlantıda indirilebilir bir görsel bulunamadı.")
 
         tot_bytes = int(resp.headers.get("Content-Length") or 0)
         dl_bytes = 0
@@ -232,6 +276,7 @@ class _DownloadWorker(QObject):
     def run(self) -> None:
         task_id = self.task["task_id"]
         url = self.task["url"]
+        src_url, item_idx = smart_resolve.split_item(url)
         out_dir = Path(self.task["output_dir"])
         out_dir.mkdir(parents=True, exist_ok=True)
         ffmpeg_loc = self.ffmpeg_mgr.get_ytdlp_ffmpeg_location()
@@ -244,7 +289,10 @@ class _DownloadWorker(QObject):
                     task_id,
                     {"status": "downloading", "status_text": "Medya bilgileri alınıyor..."},
                 )
-                meta = fetch_video_metadata(url, ffmpeg_loc)
+                meta = fetch_video_metadata(src_url, ffmpeg_loc)
+                if meta.is_gallery and item_idx is None and meta.gallery_items:
+                    self.gallery_expanded.emit(task_id, meta)
+                    return
                 if meta.media_type == "image":
                     self.task["audio_mode"] = "image"
                     expected_ext = "png" if self.task["video_format"] == "PNG" else ("jpg" if self.task["video_format"] == "JPG" else ("webp" if self.task["video_format"] == "WEBP" else "jpg"))
@@ -281,6 +329,7 @@ class _DownloadWorker(QObject):
             video_fmt_lower = video_fmt.lower()
             target_h = self.task.get("target_height")
             premiere_opt = bool(self.task.get("premiere_optimize"))
+            premiere_note = ""
 
             outtmpl = str(out_dir / f"{file_stem}.%(ext)s")
 
@@ -336,6 +385,7 @@ class _DownloadWorker(QObject):
                 "outtmpl": outtmpl,
                 "quiet": True,
                 "no_warnings": True,
+                "noprogress": True,
                 "noplaylist": True,
                 "continuedl": True,
                 "retries": 5,
@@ -376,7 +426,11 @@ class _DownloadWorker(QObject):
                 if sort_rules:
                     ydl_opts["format_sort"] = sort_rules
 
-            info = extract(url, ydl_opts, download=True)
+            if item_idx is not None:
+                # Galeri öğesi: gönderinin yalnızca o sıradaki videosu indirilir.
+                ydl_opts["noplaylist"] = False
+                ydl_opts["playlist_items"] = str(item_idx)
+            info = extract(src_url, ydl_opts, download=True)
             if info and "entries" in info and info["entries"]:
                 info = [e for e in info["entries"] if e][0]
             if info and not self.task.get("thumbnail_path"):
@@ -420,37 +474,27 @@ class _DownloadWorker(QObject):
                         },
                     )
 
-                opt_target = out_dir / f"{file_stem}.mp4"
-                temp_opt = out_dir / f"{file_stem}.premiere_tmp.mp4"
-
                 self._check_interrupt()
-                success = self.ffmpeg_mgr.convert_for_premiere(
-                    input_path=resolved_file,
-                    output_path=temp_opt,
-                    progress_callback=on_conv_progress,
-                    cancel_check=lambda: self.cancel_event.is_set() or self.pause_event.is_set(),
-                )
+                try:
+                    resolved_file = self.ffmpeg_mgr.optimize_for_premiere(
+                        resolved_file,
+                        progress_callback=on_conv_progress,
+                        cancel_check=lambda: self.cancel_event.is_set() or self.pause_event.is_set(),
+                    )
+                except FFmpegCancelledError:
+                    raise
+                except Exception as conv_exc:
+                    # Dönüşüm başarısız olsa bile indirilen orijinal dosya korunur;
+                    # görev "başarısız" sayılmaz, kullanıcı dosyasını kaybetmez.
+                    log_event(f"Premiere dönüşümü başarısız, orijinal dosya korundu: {conv_exc}")
+                    premiere_note = " (Premiere dönüşümü yapılamadı, orijinal dosya korundu)"
                 self._check_interrupt()
-
-                if success and temp_opt.is_file() and temp_opt.stat().st_size > 0:
-                    if resolved_file.resolve() != opt_target.resolve() and resolved_file.exists():
-                        try:
-                            resolved_file.unlink(missing_ok=True)
-                        except OSError:
-                            pass
-                    if opt_target.exists() and opt_target.resolve() != temp_opt.resolve():
-                        opt_target.unlink(missing_ok=True)
-                    temp_opt.replace(opt_target)
-                    resolved_file = opt_target
-                else:
-                    if temp_opt.exists():
-                        temp_opt.unlink(missing_ok=True)
 
             self.progress_changed.emit(
                 task_id,
                 {
                     "status": "downloading",
-                    "status_text": "Tamamlandı",
+                    "status_text": "Tamamlandı" + premiere_note,
                     "progress": 100.0,
                     "speed_bps": 0.0,
                     "eta_seconds": 0,
@@ -622,6 +666,7 @@ class DownloadManager(QObject):
         items: list[GalleryItem],
         image_format: str = "Orijinal",
         premiere_opt: bool = False,
+        platform: str = "",
     ) -> list[str]:
         out_dir = Path(self._settings.data.download_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -652,7 +697,7 @@ class DownloadManager(QObject):
                 task_id=uuid.uuid4().hex[:12],
                 url=item.url,
                 title=item.title,
-                platform="Instagram" if "instagram" in item.url.lower() else "Web Medya",
+                platform=platform or resolve_platform_info(None, item.url)[0],
                 duration=item.duration,
                 thumbnail_url=item.thumbnail_url,
                 video_format=video_fmt,
@@ -749,7 +794,7 @@ class DownloadManager(QObject):
         self.task_updated.emit(task.to_dict())
         self._emit_counts()
 
-        thread = QThread()
+        thread = threads.track(QThread())
         worker = _DownloadWorker(task.to_dict(), self._ffmpeg, pause_ev, cancel_ev)
         worker.moveToThread(thread)
 
@@ -768,7 +813,8 @@ class DownloadManager(QObject):
             self._emit_counts()
             self._schedule()
 
-        for terminal_sig in (worker.completed, worker.paused, worker.cancelled, worker.failed):
+        worker.gallery_expanded.connect(self._on_worker_gallery_expanded)
+        for terminal_sig in (worker.completed, worker.paused, worker.cancelled, worker.failed, worker.gallery_expanded):
             terminal_sig.connect(thread.quit)
         thread.finished.connect(cleanup)
 
@@ -846,7 +892,9 @@ class DownloadManager(QObject):
         task.speed_bps = 0.0
         task.eta_seconds = 0
         task.status = "completed"
-        task.status_text = "Tamamlandı"
+        # Worker "Tamamlandı (...)" gibi bir not eklediyse koru.
+        if not (task.status_text or "").startswith("Tamamlandı"):
+            task.status_text = "Tamamlandı"
 
         media_id = self._db.upsert_media_item(
             title=task.title,
@@ -885,6 +933,24 @@ class DownloadManager(QObject):
         self.task_updated.emit(task.to_dict())
         self.task_completed.emit(task.to_dict(), media_id)
         self._emit_counts()
+
+    def _on_worker_gallery_expanded(self, task_id: str, meta: Any) -> None:
+        """Toplu eklenen bağlantı galeri çıktı: görevi kaldırıp her öğe için görev açar."""
+        task = self._tasks.get(task_id)
+        if not task:
+            return
+        image_format = task.video_format if task.video_format in ("PNG", "JPG", "WEBP") else "Orijinal"
+        self._tasks.pop(task_id, None)
+        if task_id in self._task_order:
+            self._task_order.remove(task_id)
+        self._db.remove_download_task(task_id)
+        self.task_removed.emit(task_id)
+        self.enqueue_gallery_items(
+            list(meta.gallery_items),
+            image_format=image_format,
+            premiere_opt=task.premiere_optimize,
+            platform=meta.platform,
+        )
 
     def _on_worker_paused(self, task_id: str) -> None:
         task = self._tasks.get(task_id)

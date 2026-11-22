@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QMenu,
     QPushButton,
     QStackedWidget,
     QSystemTrayIcon,
@@ -21,6 +22,7 @@ from PySide6.QtWidgets import (
 from config.constants import APP_NAME, APP_SUBTITLE, APP_VERSION, DEFAULT_UPDATE_REPO
 from config.settings import SettingsManager
 from config.theme import ThemePalette, build_stylesheet, get_theme
+from core import threads
 from core.database import DatabaseManager
 from core.downloader import DownloadManager, DownloadOptions, reveal_in_explorer
 from core.ffmpeg import FFmpegManager
@@ -157,7 +159,31 @@ class MainWindow(QMainWindow):
         if QSystemTrayIcon.isSystemTrayAvailable():
             self.tray_icon = QSystemTrayIcon(get_icon("logo", self.palette.accent, 32), self)
             self.tray_icon.setToolTip(APP_NAME)
+            menu = QMenu(self)
+            menu.addAction("MediaDock'u Aç", self._restore_from_tray)
+            menu.addSeparator()
+            menu.addAction("Çıkış", self._quit_from_tray)
+            self.tray_icon.setContextMenu(menu)
+            self.tray_icon.activated.connect(self._on_tray_activated)
             self.tray_icon.show()
+        self._tray_hint_shown = False
+
+    def _on_tray_activated(self, reason) -> None:
+        if reason in (QSystemTrayIcon.ActivationReason.Trigger, QSystemTrayIcon.ActivationReason.DoubleClick):
+            self._restore_from_tray()
+
+    def _restore_from_tray(self) -> None:
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+
+    def _quit_from_tray(self) -> None:
+        app = QApplication.instance()
+        if app is not None:
+            app.setProperty("mediadock_force_quit", True)
+        self.close()
+        if app is not None:
+            app.quit()
 
     def _connect_signals(self) -> None:
         self.sidebar.page_selected.connect(self._switch_page)
@@ -201,11 +227,12 @@ class MainWindow(QMainWindow):
         if self.settings.data.auto_scan_library:
             self.scanner.scan(self.settings.data.download_dir)
 
-        QTimer.singleShot(2500, self._check_updates_background)
+        if self.settings.data.auto_check_updates and "--self-test" not in sys.argv:
+            QTimer.singleShot(2500, self._check_updates_background)
 
     def _check_updates_background(self) -> None:
         repo = self.settings.data.update_repo or DEFAULT_UPDATE_REPO
-        thread = QThread(self)
+        thread = threads.track(QThread(self))
         worker = UpdateCheckWorker(repo, APP_VERSION)
         worker.moveToThread(thread)
         self._bg_update_thread = thread
@@ -219,9 +246,13 @@ class MainWindow(QMainWindow):
         thread.start()
 
     def _on_background_update_checked(self, info: UpdateInfo) -> None:
-        if info.has_update:
-            self.show_toast(f"Yeni MediaDock sürümü mevcut: v{info.latest_version}", "info")
-            QTimer.singleShot(250, lambda: self._show_update_dialog(info))
+        if not info.has_update:
+            return
+        if info.latest_version and info.latest_version == self.settings.data.skipped_update_version:
+            # Kullanıcı bu sürümü atlamayı seçti; Ayarlar'dan elle denetlenebilir.
+            return
+        self.show_toast(f"Yeni MediaDock sürümü mevcut: v{info.latest_version}", "info")
+        QTimer.singleShot(250, lambda: self._show_update_dialog(info, allow_skip=True))
 
     def _cleanup_background_update(self) -> None:
         worker = getattr(self, "_bg_update_worker", None)
@@ -233,9 +264,20 @@ class MainWindow(QMainWindow):
         if thread is not None:
             thread.deleteLater()
 
-    def _show_update_dialog(self, info: UpdateInfo) -> None:
-        dlg = UpdateDialog(info, self.palette, self)
-        dlg.exec()
+    def _show_update_dialog(self, info: UpdateInfo, allow_skip: bool = False) -> None:
+        if getattr(self, "_update_dialog_open", False):
+            return
+        self._update_dialog_open = True
+        try:
+            dlg = UpdateDialog(info, self.palette, self, allow_skip=allow_skip)
+            dlg.skip_version_requested.connect(self._on_skip_version)
+            dlg.exec()
+        finally:
+            self._update_dialog_open = False
+
+    def _on_skip_version(self, version: str) -> None:
+        self.settings.update(skipped_update_version=version)
+        self.show_toast(f"v{version} atlandı. Ayarlar'dan istediğiniz zaman güncelleyebilirsiniz.", "info")
 
     def _run_dependency_check(self) -> None:
         status = self.ffmpeg_mgr.check_dependencies()
@@ -396,6 +438,21 @@ class MainWindow(QMainWindow):
         event.acceptProposedAction()
 
     def closeEvent(self, event) -> None:
+        app = QApplication.instance()
+        force = bool(app.property("mediadock_force_quit")) if app is not None else True
+        if self.settings.data.close_to_tray and self.tray_icon is not None and not force:
+            # Pencere gizlenir, indirmeler arka planda sürer.
+            event.ignore()
+            self.hide()
+            if not self._tray_hint_shown:
+                self._tray_hint_shown = True
+                self.tray_icon.showMessage(
+                    APP_NAME,
+                    "MediaDock arka planda çalışmaya devam ediyor. Kapatmak için simgeye sağ tıklayıp Çıkış'ı seçin.",
+                    QSystemTrayIcon.MessageIcon.Information,
+                    3000,
+                )
+            return
         self.download_mgr.shutdown()
         if self.tray_icon:
             self.tray_icon.hide()

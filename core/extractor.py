@@ -40,11 +40,22 @@ _lock = threading.Lock()
 _remembered: str | None = None
 _loaded = False
 _cookies_enabled = False
+_instagram_cookies_allowed = False
 
 
 def set_cookies_enabled(enabled: bool) -> None:
     global _cookies_enabled
     _cookies_enabled = bool(enabled)
+
+
+def set_instagram_cookies_allowed(allowed: bool) -> None:
+    """Instagram için çerez kullanımı yalnızca kullanıcı ayrıca izin verirse açılır."""
+    global _instagram_cookies_allowed
+    _instagram_cookies_allowed = bool(allowed)
+
+
+def _cookies_blocked_for(url: str) -> bool:
+    return is_instagram_url(url) and not _instagram_cookies_allowed
 
 
 def cookies_enabled() -> bool:
@@ -128,15 +139,15 @@ def _browser_order() -> list[str]:
 
 
 def extract(url: str, opts: dict[str, Any], download: bool = False) -> dict[str, Any] | None:
-    instagram = is_instagram_url(url)
-    # Instagram için çerez seçenekleri ne olursa olsun yt-dlp'ye hiç iletilmez.
-    safe_opts = {k: v for k, v in opts.items() if k not in _COOKIE_OPTION_KEYS} if instagram else opts
+    blocked = _cookies_blocked_for(url)
+    # Instagram'da, kullanıcı ayrıca izin vermedikçe çerez seçenekleri yt-dlp'ye hiç iletilmez.
+    safe_opts = {k: v for k, v in opts.items() if k not in _COOKIE_OPTION_KEYS} if blocked else opts
 
     try:
         return _run(url, safe_opts, download)
     except Exception as first_exc:
-        # Tarayıcı çerezleri yalnızca kullanıcı açıkça izin verdiyse ve Instagram dışı sitelerde denenir.
-        if instagram or not _cookies_enabled or not is_auth_error(first_exc):
+        # Tarayıcı çerezleri yalnızca kullanıcı açıkça izin verdiyse ve yalnızca giriş hatasında denenir.
+        if blocked or not _cookies_enabled or not is_auth_error(first_exc):
             raise
         first_error = first_exc
 

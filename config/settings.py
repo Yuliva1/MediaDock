@@ -35,6 +35,9 @@ class AppSettingsData:
     auto_check_updates: bool = True
     update_repo: str = DEFAULT_UPDATE_REPO
     use_browser_cookies: bool = False
+    instagram_cookies_opt_in: bool = False
+    skipped_update_version: str = ""
+    close_to_tray: bool = False
 
     def __post_init__(self) -> None:
         if not self.download_dir:
