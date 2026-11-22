@@ -126,6 +126,10 @@ def _import_yt_dlp() -> Any:
 
 def _run(url: str, opts: dict[str, Any], download: bool) -> dict[str, Any] | None:
     yt_dlp = _import_yt_dlp()
+    if "js_runtimes" not in opts:
+        from core.js_runtime import runtimes
+
+        opts = {**opts, "js_runtimes": runtimes()}
 
     with yt_dlp.YoutubeDL(opts) as ydl:
         return ydl.extract_info(url, download=download)

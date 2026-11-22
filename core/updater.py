@@ -272,13 +272,20 @@ class UpdateDownloadWorker(QObject):
             raise delta_update.DeltaError("Manifest doğrulaması başarısız.")
         manifest = json.loads(resp.content.decode("utf-8"))
 
-        needed = delta_update.plan_changes(manifest, app_dir)
+        try:
+            needed = delta_update.plan_changes(manifest, app_dir, self._check_cancel)
+        except delta_update.DeltaCancelled as exc:
+            raise UpdateCancelled(str(exc)) from exc
         if not delta_update.delta_is_worthwhile(manifest, needed):
             raise delta_update.DeltaError("Delta güncelleme bu sürüm için uygun değil.")
 
         total = sum(int(e["csize"]) for e in needed)
         self.status.emit(f"Yalnızca değişen {len(needed)} dosya indiriliyor...")
-        staging = Path(tempfile.gettempdir()) / "MediaDock-Update" / "delta"
+        # Her deneme kendi klasörünü kullanır: iptal edilip arka planda bitmeye
+        # çalışan eski bir indirme yenisinin dosyalarını ezmesin.
+        base = Path(tempfile.gettempdir()) / "MediaDock-Update"
+        base.mkdir(parents=True, exist_ok=True)
+        staging = Path(tempfile.mkdtemp(prefix="delta-", dir=str(base)))
 
         def on_progress(done: int, tot: int, speed: float) -> None:
             pct = (done / tot * 100.0) if tot > 0 else 0.0
@@ -298,6 +305,7 @@ class UpdateDownloadWorker(QObject):
         temp_dir = Path(tempfile.gettempdir()) / "MediaDock-Update"
         temp_dir.mkdir(parents=True, exist_ok=True)
         dest = temp_dir / self.asset_name
+        part = dest.with_name(dest.name + ".part")
 
         resp = requests.get(self.download_url, headers=self._headers(), stream=True, timeout=30)
         resp.raise_for_status()
@@ -308,9 +316,11 @@ class UpdateDownloadWorker(QObject):
         last_emit = 0.0
         h = hashlib.sha256()
 
-        with open(dest, "wb") as f:
+        with open(part, "wb") as f:
             for chunk in resp.iter_content(chunk_size=131072):
                 if self._cancelled:
+                    f.close()
+                    part.unlink(missing_ok=True)
                     raise UpdateCancelled("Güncelleme indirme işlemi kullanıcı tarafından iptal edildi.")
                 if not chunk:
                     continue
@@ -324,10 +334,14 @@ class UpdateDownloadWorker(QObject):
                     speed = downloaded / max(now - t0, 0.001)
                     self.progress.emit(min(99.0, pct), downloaded, total_bytes, speed)
 
+        if total_bytes and downloaded != total_bytes:
+            part.unlink(missing_ok=True)
+            raise RuntimeError("Kurulum dosyası eksik indirildi; lütfen tekrar deneyin.")
         expected = self._load_sums().get(self.asset_name.lower())
         if expected and h.hexdigest() != expected:
-            dest.unlink(missing_ok=True)
+            part.unlink(missing_ok=True)
             raise RuntimeError("İndirilen kurulum dosyasının SHA-256 doğrulaması başarısız. Dosya silindi.")
+        os.replace(part, dest)
         if not expected:
             log_event("Uyarı: sürümde sha256sums.txt yok; kurulum dosyası hash ile doğrulanmadı.")
 
@@ -365,10 +379,32 @@ def _quit_app() -> None:
         app.quit()
 
 
+UNINSTALL_KEY = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\{B7E4C2A1-5D3F-4E8A-9C61-2F0A7D9E4B13}_is1"
+
+
+def _update_uninstall_version(version: str) -> None:
+    """Delta güncellemeden sonra Windows 'Uygulamalar' listesindeki sürümü yeniler."""
+    if sys.platform != "win32" or not version:
+        return
+    try:
+        import winreg
+
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, UNINSTALL_KEY, 0, winreg.KEY_SET_VALUE) as key:
+            winreg.SetValueEx(key, "DisplayVersion", 0, winreg.REG_SZ, version)
+            winreg.SetValueEx(key, "DisplayName", 0, winreg.REG_SZ, f"MediaDock {version} sürümü")
+    except OSError:
+        pass  # kurulum yönetici olarak yapılmış (HKLM) ya da kayıt yok; önemsiz
+
+
 def apply_delta_and_restart(staging_dir: str) -> None:
     if not is_frozen():
         raise RuntimeError("Delta güncelleme yalnızca kurulu (exe) sürümde uygulanabilir.")
+    try:
+        new_version = str(json.loads((Path(staging_dir) / delta_update.MANIFEST_NAME).read_text(encoding="utf-8")).get("version") or "")
+    except (OSError, ValueError):
+        new_version = ""
     delta_update.apply_staged(Path(staging_dir), delta_update.app_dir_for_frozen())
+    _update_uninstall_version(new_version)
     log_event("Delta güncelleme uygulandı, uygulama yeniden başlatılıyor.")
     delta_update.restart_app(Path(sys.executable).resolve())
     _quit_app()

@@ -218,14 +218,60 @@ class HistoryPage(QWidget):
         self.stack.addWidget(scroll)
         root.addWidget(self.stack, 1)
 
-    def refresh(self) -> None:
+        # Binlerce kayıtta pencere/GDI sınırına takılmamak için sayfalama.
+        self.pagination_bar = QFrame()
+        self.pagination_bar.setObjectName("SubtlePanel")
+        self.pagination_bar.hide()
+        pg_lay = QHBoxLayout(self.pagination_bar)
+        pg_lay.setContentsMargins(14, 8, 14, 8)
+        pg_lay.setSpacing(12)
+        self.prev_page_btn = QPushButton("← Önceki Sayfa")
+        self.prev_page_btn.setObjectName("SecondaryButton")
+        self.prev_page_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.prev_page_btn.clicked.connect(lambda: self._go_page(-1))
+        self.page_info_lbl = QLabel("Sayfa 1 / 1")
+        self.page_info_lbl.setObjectName("MutedText")
+        self.next_page_btn = QPushButton("Sonraki Sayfa →")
+        self.next_page_btn.setObjectName("SecondaryButton")
+        self.next_page_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.next_page_btn.clicked.connect(lambda: self._go_page(1))
+        pg_lay.addWidget(self.prev_page_btn)
+        pg_lay.addStretch()
+        pg_lay.addWidget(self.page_info_lbl)
+        pg_lay.addStretch()
+        pg_lay.addWidget(self.next_page_btn)
+        root.addWidget(self.pagination_bar)
+
+    PAGE_SIZE = 40
+
+    def _go_page(self, delta: int) -> None:
+        self._page = max(1, min(self._total_pages, self._page + delta))
+        self.refresh(reset_page=False)
+
+    def refresh(self, reset_page: bool = True) -> None:
+        if not hasattr(self, "_page"):
+            self._page = 1
+            self._total_pages = 1
+        if reset_page:
+            self._page = 1
+
         while self.list_layout.count() > 1:
             li = self.list_layout.takeAt(0)
             if li and li.widget():
                 li.widget().deleteLater()
 
-        entries = self._db.get_history_entries(self.search_input.text().strip())
-        self.clear_btn.setEnabled(len(entries) > 0)
+        search = self.search_input.text().strip()
+        total = self._db.get_history_count(search)
+        self._total_pages = max(1, (total + self.PAGE_SIZE - 1) // self.PAGE_SIZE)
+        self._page = min(self._page, self._total_pages)
+        entries = self._db.get_history_entries(
+            search, limit=self.PAGE_SIZE, offset=(self._page - 1) * self.PAGE_SIZE
+        )
+        self.clear_btn.setEnabled(total > 0 or bool(search))
+        self.pagination_bar.setVisible(self._total_pages > 1)
+        self.prev_page_btn.setEnabled(self._page > 1)
+        self.next_page_btn.setEnabled(self._page < self._total_pages)
+        self.page_info_lbl.setText(f"Sayfa {self._page} / {self._total_pages}   ·   Toplam {total} kayıt")
 
         if not entries:
             self.stack.setCurrentIndex(0)
@@ -242,7 +288,7 @@ class HistoryPage(QWidget):
 
     def _delete_one(self, history_id: int) -> None:
         self._db.delete_history_entry(history_id)
-        self.refresh()
+        self.refresh(reset_page=False)
 
     def _confirm_clear_all(self) -> None:
         dlg = QDialog(self)

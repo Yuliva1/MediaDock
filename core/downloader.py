@@ -1042,7 +1042,9 @@ class DownloadManager(QObject):
             self._emit_counts()
 
     def clear_completed(self) -> None:
-        to_remove = [tid for tid, t in self._tasks.items() if t.status == "completed"]
+        # Tamamlanan, iptal edilen ve başarısız görevler listeden temizlenir
+        # (başarısızlar aksi halde sonsuza dek birikiyordu).
+        to_remove = [tid for tid, t in self._tasks.items() if t.status in ("completed", "cancelled", "failed")]
         for tid in to_remove:
             self._tasks.pop(tid, None)
             if tid in self._task_order:
@@ -1116,11 +1118,14 @@ def _select_item_in_explorer(item_path: str) -> bool:
         "if (-not $found) { & explorer.exe /select,$p }"
     )
     try:
-        subprocess.run(
+        # Beklenmez: PowerShell'in açılması 1-2 sn sürebilir, arayüz donmasın.
+        subprocess.Popen(
             ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_cmd],
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000),
-            timeout=5,
             env={**os.environ, "MEDIADOCK_TARGET": str(target)},
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
         return True
     except Exception:

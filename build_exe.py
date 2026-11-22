@@ -118,6 +118,25 @@ def copy_ffmpeg_into_dist() -> None:
             print(f"Eklendi: {Path(src).name}")
 
 
+def copy_deno_into_dist() -> None:
+    """YouTube için JavaScript çalıştırıcısını (Deno) pakete ekler.
+
+    Deno yoksa yt-dlp YouTube'da bazı biçimleri (çoğunlukla yüksek çözünürlük)
+    çözemez. MEDIADOCK_BUNDLE_DENO=0 ile atlanabilir. Deno MIT lisanslıdır.
+    """
+    if os.environ.get("MEDIADOCK_BUNDLE_DENO", "1") == "0":
+        print("Deno paketlenmedi (MEDIADOCK_BUNDLE_DENO=0).")
+        return
+    deno = shutil.which("deno")
+    if not deno:
+        print("Uyari: deno bulunamadi; YouTube icin JS calistiricisi pakete eklenmedi.")
+        return
+    bin_dir = ROOT / "dist" / "MediaDock" / "bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(deno, bin_dir / Path(deno).name)
+    print(f"Eklendi: {Path(deno).name}")
+
+
 def find_iscc() -> Path | None:
     on_path = shutil.which("iscc")
     if on_path:
@@ -145,6 +164,13 @@ def build() -> int:
         return result.returncode
 
     copy_ffmpeg_into_dist()
+    copy_deno_into_dist()
+
+    release_tool = [sys.executable, str(ROOT / "tools" / "make_release_assets.py")]
+    # Kurulum, delta güncellemenin eski dosyaları tanıması için manifesti de içersin.
+    result = subprocess.run([*release_tool, "--write-installed-manifest"], cwd=str(ROOT))
+    if result.returncode != 0:
+        return result.returncode
 
     iscc = find_iscc()
     if iscc is None:
@@ -159,7 +185,7 @@ def build() -> int:
         print(f"Kurulum dosyasi: {inst_target}")
     if result.returncode == 0:
         # Delta güncelleme paketi, manifest ve SHA-256 listesi (release/ klasörüne).
-        result = subprocess.run([sys.executable, str(ROOT / "tools" / "make_release_assets.py")], cwd=str(ROOT))
+        result = subprocess.run(release_tool, cwd=str(ROOT))
     return result.returncode
 
 

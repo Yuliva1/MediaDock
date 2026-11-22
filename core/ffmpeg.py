@@ -30,6 +30,8 @@ class DependencyStatus:
     ytdlp_ok: bool
     ytdlp_version: str
     message: str = ""
+    js_runtime_ok: bool = True
+    js_runtime_info: str = ""
 
 
 @dataclass
@@ -211,7 +213,12 @@ class FFmpegManager:
         else:
             msg = "Tüm indirme ve medya işleme motorları hazır."
 
+        from core.js_runtime import describe
+
+        js_ok, js_info = describe()
         return DependencyStatus(
+            js_runtime_ok=js_ok,
+            js_runtime_info=js_info,
             ffmpeg_ok=ff_ok,
             ffprobe_ok=fp_ok,
             ffmpeg_path=self.ffmpeg_path,

@@ -80,7 +80,8 @@ class DownloadsPage(QWidget):
         self.open_dir_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.open_dir_btn.clicked.connect(lambda: reveal_in_explorer(self._settings.data.download_dir))
 
-        self.clear_done_btn = QPushButton("Tamamlananları Temizle")
+        self.clear_done_btn = QPushButton("Bitenleri Temizle")
+        self.clear_done_btn.setToolTip("Tamamlanan, iptal edilen ve başarısız indirmeleri listeden kaldırır")
         self.clear_done_btn.setObjectName("SecondaryButton")
         self.clear_done_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.clear_done_btn.clicked.connect(self._dl.clear_completed)

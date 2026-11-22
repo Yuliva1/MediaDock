@@ -90,10 +90,16 @@ def validate_manifest(manifest: dict[str, Any]) -> list[dict[str, Any]]:
     return files
 
 
-def plan_changes(manifest: dict[str, Any], app_dir: Path) -> list[dict[str, Any]]:
+def plan_changes(
+    manifest: dict[str, Any],
+    app_dir: Path,
+    cancel: Callable[[], bool] = lambda: False,
+) -> list[dict[str, Any]]:
     """Kurulu dosyalarla karşılaştırıp indirilmesi gereken girdileri döndürür."""
     needed: list[dict[str, Any]] = []
     for e in validate_manifest(manifest):
+        if cancel():
+            raise DeltaCancelled("Güncelleme kullanıcı tarafından iptal edildi.")
         target = _local_path(app_dir, e["path"])
         try:
             if target.is_file() and target.stat().st_size == int(e["size"]):

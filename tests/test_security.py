@@ -17,7 +17,7 @@ def test_explorer_script_never_contains_the_file_path(monkeypatch, tmp_path):
         captured["env"] = kw.get("env", {})
 
     monkeypatch.setattr(downloader.sys, "platform", "win32")
-    monkeypatch.setattr("subprocess.run", fake_run)
+    monkeypatch.setattr("subprocess.Popen", fake_run)
     assert downloader._select_item_in_explorer(str(evil)) is True
     script = captured["cmd"][-1]
     assert "Start-Process" not in script and "calc" not in script

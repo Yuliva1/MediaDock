@@ -45,6 +45,19 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 [Files]
 Source: "dist\MediaDock\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
+[InstallDelete]
+; Önceki delta güncellemelerden kalabilecek yedekler.
+Type: files; Name: "{app}\*.old"
+Type: files; Name: "{app}\*.new"
+
+[UninstallDelete]
+; Delta güncellemeyle sonradan eklenen dosyalar kaldırma kaydında yoktur; bu klasörleri tamamen temizle.
+Type: filesandordirs; Name: "{app}\_internal"
+Type: filesandordirs; Name: "{app}\bin"
+Type: files; Name: "{app}\*.old"
+Type: files; Name: "{app}\*.new"
+Type: files; Name: "{app}\.mediadock-manifest.json"
+
 [Icons]
 Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopicon

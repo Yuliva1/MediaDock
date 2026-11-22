@@ -232,6 +232,9 @@ class Sidebar(QFrame):
             dot_col = self._palette.success
             title = "Motor Aktif · Hazır"
             sub = f"yt-dlp {status.ytdlp_version} · FFmpeg"
+            if not status.js_runtime_ok:
+                dot_col = self._palette.warning
+                title = "Motor Aktif · JS Eksik"
         elif status.ytdlp_ok and not status.ffmpeg_ok:
             dot_col = self._palette.warning
             title = "FFmpeg Eksik"
@@ -246,6 +249,7 @@ class Sidebar(QFrame):
         self.sub_engine_lbl.setText(sub)
         self.footer_card.setToolTip(
             f"{status.message}\nyt-dlp: {status.ytdlp_version}\nFFmpeg: {status.ffmpeg_version}"
+            f"\n{status.js_runtime_info}"
         )
 
     def set_palette_theme(self, palette: ThemePalette) -> None:

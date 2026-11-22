@@ -356,21 +356,33 @@ class DatabaseManager:
             self._conn.commit()
             return int(cur.lastrowid or 0)
 
-    def get_history_entries(self, search: str = "") -> list[dict[str, Any]]:
+    @staticmethod
+    def _history_where(search: str) -> tuple[str, tuple[str, ...]]:
+        if not search.strip():
+            return "", ()
+        q = f"%{search.strip()}%"
+        return (
+            " WHERE title LIKE ? OR source_url LIKE ? OR platform LIKE ? OR uploader LIKE ?",
+            (q, q, q, q),
+        )
+
+    def get_history_entries(
+        self, search: str = "", limit: int | None = None, offset: int = 0
+    ) -> list[dict[str, Any]]:
+        where, params = self._history_where(search)
+        limit_sql = f" LIMIT {int(limit)} OFFSET {int(offset)}" if limit is not None else ""
         with self._lock:
-            if search.strip():
-                q = f"%{search.strip()}%"
-                cur = self._conn.execute(
-                    """
-                    SELECT * FROM download_history
-                    WHERE title LIKE ? OR source_url LIKE ? OR platform LIKE ? OR uploader LIKE ?
-                    ORDER BY downloaded_at DESC, id DESC
-                    """,
-                    (q, q, q, q),
-                )
-            else:
-                cur = self._conn.execute("SELECT * FROM download_history ORDER BY downloaded_at DESC, id DESC")
+            cur = self._conn.execute(
+                f"SELECT * FROM download_history{where} ORDER BY downloaded_at DESC, id DESC{limit_sql}",
+                params,
+            )
             return [dict(row) for row in cur.fetchall()]
+
+    def get_history_count(self, search: str = "") -> int:
+        where, params = self._history_where(search)
+        with self._lock:
+            row = self._conn.execute(f"SELECT COUNT(*) FROM download_history{where}", params).fetchone()
+            return int(row[0] if row else 0)
 
     def delete_history_entry(self, history_id: int) -> None:
         with self._lock:
@@ -456,7 +468,7 @@ class DatabaseManager:
 
     def clear_finished_tasks(self) -> None:
         with self._lock:
-            self._conn.execute("DELETE FROM download_tasks WHERE status IN ('completed', 'cancelled')")
+            self._conn.execute("DELETE FROM download_tasks WHERE status IN ('completed', 'cancelled', 'failed')")
             self._conn.commit()
 
     def close(self) -> None:

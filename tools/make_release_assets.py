@@ -29,6 +29,8 @@ ASSET_ZIP = "mediadock-app.zip"
 ASSET_MANIFEST = "manifest.json"
 ASSET_SUMS = "sha256sums.txt"
 FIXED_TIME = (2020, 1, 1, 0, 0, 0)
+# Kurulu klasöre yazılan manifest; kendisi pakete/manifeste girmez.
+INSTALLED_MANIFEST = ".mediadock-manifest.json"
 
 
 def sha256_bytes(data: bytes) -> str:
@@ -44,7 +46,10 @@ def sha256_path(path: Path) -> str:
 
 
 def build_zip_and_manifest(dist: Path, out_zip: Path, version: str) -> dict:
-    files = sorted(p for p in dist.rglob("*") if p.is_file())
+    files = sorted(
+        p for p in dist.rglob("*")
+        if p.is_file() and p.relative_to(dist).as_posix() != INSTALLED_MANIFEST
+    )
     if not files:
         raise SystemExit(f"Dosya bulunamadı: {dist}")
 
@@ -86,6 +91,11 @@ def main() -> int:
     ap.add_argument("--installer", default=str(ROOT / "installer" / "MediaDock-Setup.exe"))
     ap.add_argument("--out", default=str(ROOT / "release"))
     ap.add_argument("--version", default=APP_VERSION)
+    ap.add_argument(
+        "--write-installed-manifest",
+        action="store_true",
+        help="Manifesti dist klasörüne de yazar (kurulumdan önce çalıştırılır).",
+    )
     args = ap.parse_args()
 
     dist, out = Path(args.dist), Path(args.out)
@@ -99,6 +109,8 @@ def main() -> int:
     manifest = build_zip_and_manifest(dist, zip_path, args.version)
     manifest_path = out / ASSET_MANIFEST
     manifest_path.write_text(json.dumps(manifest, separators=(",", ":")), encoding="utf-8")
+    if args.write_installed_manifest:
+        (dist / INSTALLED_MANIFEST).write_text(json.dumps(manifest), encoding="utf-8")
 
     release_files = [zip_path, manifest_path]
     installer = Path(args.installer)
