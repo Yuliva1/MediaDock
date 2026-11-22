@@ -26,6 +26,7 @@ from config.constants import (
 )
 from config.settings import SettingsManager
 from config.theme import ThemePalette, get_theme
+from core import smart_resolve
 from core.downloader import DownloadOptions
 from core.metadata import (
     MetadataController,
@@ -48,7 +49,7 @@ class HomePage(QWidget):
 
     download_requested = Signal(object, object)
     batch_urls_requested = Signal(list)
-    gallery_download_requested = Signal(list, str)
+    gallery_download_requested = Signal(list, str, str)
 
     def __init__(
         self,
@@ -118,7 +119,7 @@ class HomePage(QWidget):
         hdr_top.addWidget(self.batch_btn)
 
         subtitle = QLabel(
-            "YouTube, Kick, X, Instagram dump/post, TikTok veya görsel ve video bağlantısı yapıştırın."
+            "Bağlantıyı yapıştırın; video, reels, fotoğraf ve carousel otomatik algılanır (YouTube, Instagram, X, TikTok ve daha fazlası)."
         )
         subtitle.setObjectName("PageSubtitle")
         subtitle.setWordWrap(True)
@@ -358,6 +359,15 @@ class HomePage(QWidget):
         self.target_folder_lbl.setObjectName("MutedText")
         action_row.addWidget(self.target_folder_lbl, 1)
 
+        self.select_btn = QPushButton("Seçerek İndir")
+        self.select_btn.setObjectName("SecondaryButton")
+        self.select_btn.setMinimumHeight(34)
+        self.select_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.select_btn.setToolTip("Galerideki öğelerden hangilerinin indirileceğini seçin")
+        self.select_btn.clicked.connect(self._open_gallery_selector)
+        self.select_btn.hide()
+        action_row.addWidget(self.select_btn)
+
         self.download_btn = QPushButton("İndirmeyi Başlat")
         self.download_btn.setObjectName("PrimaryButton")
         self.download_btn.setIcon(get_icon("download", "#FFFFFF", 15))
@@ -481,9 +491,11 @@ class HomePage(QWidget):
         target = urls[0] if urls else text
         self.load_url(target)
 
-    def load_url(self, url: str) -> None:
+    def load_url(self, url: str, auto: bool = True) -> None:
         clean = url.strip()
         self.clipboard_banner.hide()
+        # Yapıştırma, sürükle-bırak ve pano önerisi "hızlı indirme"ye uygundur.
+        self._auto_download_url = clean if auto else ""
         self.url_input.setText(clean)
         self._trigger_fetch(force=True)
 
@@ -581,16 +593,18 @@ class HomePage(QWidget):
 
         self.platform_badge.set_platform(meta.platform, meta.platform_color)
 
+        self.select_btn.setVisible(is_gallery)
         if is_gallery:
-            self.max_res_lbl.setText(f"{len(meta.gallery_items)} Medya (Dump)")
+            summary = smart_resolve.summarize([g.media_type for g in meta.gallery_items])
+            self.max_res_lbl.setText(summary)
             self.max_res_lbl.show()
-            self.download_btn.setText(f"Medyaları Seç ve İndir ({len(meta.gallery_items)})")
+            self.download_btn.setText(f"Hepsini İndir ({len(meta.gallery_items)})")
             self.premiere_panel.hide()
         elif is_img:
-            dim_txt = f"{meta.image_width}x{meta.image_height}" if (meta.image_width and meta.image_height) else "Görsel"
+            dim_txt = f"{meta.image_width}×{meta.image_height}" if (meta.image_width and meta.image_height) else "Fotoğraf"
             self.max_res_lbl.setText(dim_txt)
             self.max_res_lbl.show()
-            self.download_btn.setText("Görseli İndir")
+            self.download_btn.setText("Fotoğrafı İndir")
             self.premiere_panel.hide()
         elif meta.max_height > 0:
             self.max_res_lbl.setText(f"Maks. {meta.max_height}p")
@@ -610,9 +624,10 @@ class HomePage(QWidget):
         self.video_title_lbl.setText(meta.title)
         self.channel_lbl.setText(f"Kaynak: {meta.uploader}")
         if is_gallery:
-            self.duration_lbl.setText(f"Çoklu Paylaşım / Dump: {len(meta.gallery_items)} adet görsel ve video içeriyor")
+            summary = smart_resolve.summarize([g.media_type for g in meta.gallery_items])
+            self.duration_lbl.setText(f"Çoklu paylaşım: {summary}")
         elif is_img:
-            self.duration_lbl.setText("Tür: Görsel Dosyası")
+            self.duration_lbl.setText("Tür: Fotoğraf")
         else:
             dur_txt = "Canlı Yayın" if meta.is_live else (format_duration(meta.duration) if meta.duration > 0 else "Bilinmiyor")
             self.duration_lbl.setText(f"Süre: {dur_txt}")
@@ -621,6 +636,17 @@ class HomePage(QWidget):
         self._apply_available_qualities(meta)
         self._sync_option_states()
         self.preview_card.show()
+
+        auto_url = getattr(self, "_auto_download_url", "")
+        self._auto_download_url = ""
+        if (
+            self._settings.data.auto_download_on_detect
+            and auto_url
+            and auto_url == self._last_fetched_url
+            and not meta.is_live
+        ):
+            # Hızlı indirme: varsayılan ayarlarla doğrudan sıraya ekle.
+            QTimer.singleShot(0, self._emit_download)
 
     def _populate_formats_for_meta(self, meta: VideoMetadata) -> None:
         self.format_combo.blockSignals(True)
@@ -739,13 +765,11 @@ class HomePage(QWidget):
             return
 
         if self._current_meta.is_gallery and len(self._current_meta.gallery_items) > 1:
-            dlg = GalleryDialog(self._current_meta.gallery_items, self._current_meta, self._palette, self)
-            if dlg.exec():
-                selected = dlg.get_selected_items()
-                chosen_fmt = dlg.get_chosen_format()
-                if selected:
-                    self.gallery_download_requested.emit(selected, chosen_fmt)
-                    self.reset()
+            items = list(self._current_meta.gallery_items)
+            for it in items:
+                it.selected = True
+            self.gallery_download_requested.emit(items, "Orijinal", self._current_meta.platform)
+            self.reset()
             return
 
         if self._current_meta.media_type == "image":
@@ -768,6 +792,18 @@ class HomePage(QWidget):
                 premiere_optimize=self.premiere_toggle.isChecked(),
             )
         self.download_requested.emit(self._current_meta, options)
+
+    def _open_gallery_selector(self) -> None:
+        meta = self._current_meta
+        if not meta or not meta.is_gallery:
+            return
+        dlg = GalleryDialog(meta.gallery_items, meta, self._palette, self)
+        if dlg.exec():
+            selected = dlg.get_selected_items()
+            chosen_fmt = dlg.get_chosen_format()
+            if selected:
+                self.gallery_download_requested.emit(selected, chosen_fmt, meta.platform)
+                self.reset()
 
     def _open_batch_dialog(self) -> None:
         dlg = BatchUrlDialog(self)

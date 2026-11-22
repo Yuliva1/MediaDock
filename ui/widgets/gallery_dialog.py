@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import gc
+import hashlib
 from pathlib import Path
 
 from PySide6.QtCore import QObject, Qt, QThread, Signal
@@ -44,7 +45,7 @@ class _ThumbWorker(QObject):
             if self._stopped:
                 break
             if it.thumbnail_url:
-                cached = cache_thumbnail(it.thumbnail_url, f"gal_{it.index}_{it.url[:40]}")
+                cached = cache_thumbnail(it.thumbnail_url, f"gal_{it.index}_{hashlib.sha1(it.url.encode('utf-8')).hexdigest()[:12]}")
                 if cached:
                     self.finished.emit(it.index, cached)
 

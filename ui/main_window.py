@@ -327,8 +327,8 @@ class MainWindow(QMainWindow):
         self.show_toast(msg, "success")
         self.sidebar.select_page("downloads")
 
-    def _on_gallery_download_requested(self, items: list, image_format: str) -> None:
-        added = self.download_mgr.enqueue_gallery_items(items, image_format)
+    def _on_gallery_download_requested(self, items: list, image_format: str, platform: str = "") -> None:
+        added = self.download_mgr.enqueue_gallery_items(items, image_format, platform=platform)
         if added:
             self.show_toast(f"{len(added)} medya indirme sırasına eklendi.", "success")
             self.sidebar.select_page("downloads")
@@ -341,7 +341,7 @@ class MainWindow(QMainWindow):
 
     def _on_redownload_from_history(self, url: str) -> None:
         self.sidebar.select_page("home")
-        self.home_page.load_url(url)
+        self.home_page.load_url(url, auto=False)
 
     def _on_download_completed(self, task: dict, media_id: int) -> None:
         title = str(task.get("title") or "Medya")

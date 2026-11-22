@@ -69,11 +69,22 @@ MediaDock, yt-dlp'nin desteklediği her siteden **video ve ses** indirir. Bir si
 | İçerik | Durum |
 |---|---|
 | Video, Reels | İndirilebilir (herkese açık içerikte, giriş gerekmeden) |
-| Görsel gönderisi, çoklu görsel (carousel) | **Desteklenmiyor.** yt-dlp bunları indirmiyor; bu onun bilinen bir sınırlaması ve motoru güncellemek çözmüyor |
-| Doğrudan görsel bağlantısı (`...cdninstagram.com/...jpg`) | İndirilebilir; tarayıcıda görsele sağ tıklayıp **"Resim adresini kopyala"** ile alınan bağlantıyı yapıştırın |
-| Özel hesaplar, hikayeler, giriş isteyen içerik | İndirilemez |
+| Fotoğraf gönderisi | İndirilebilir, tam çözünürlükte (1.2.0'dan itibaren) |
+| Çoklu paylaşım (carousel), fotoğraf ve video karışık | İndirilebilir; "Hepsini İndir" ya da "Seçerek İndir" (1.2.0'dan itibaren) |
+| Doğrudan görsel bağlantısı (`...cdninstagram.com/...jpg`) | İndirilebilir |
+| Özel hesaplar, hikayeler, giriş isteyen içerik | Yalnızca Ayarlar'da **"Instagram'da da Çerez Kullan"** açıkken |
 
-> Hesabınızın güvenliği için Instagram'da tarayıcı çerezleri **hiçbir koşulda** kullanılmaz.
+> Instagram'da tarayıcı çerezleri varsayılan olarak **kullanılmaz**; herkese açık gönderiler çerezsiz iner.
+> Çerez izni ayrı bir ayardır ve risklidir: Instagram otomatik erişimi fark ederse hesabı kısıtlayabilir.
+> Açacaksanız ana hesabınız yerine yedek bir hesapla giriş yapılmış tarayıcı kullanın.
+
+### X (Twitter)
+
+Videolar, fotoğraflar ve fotoğraf + video karışık gönderiler indirilebilir. Fotoğraflar orijinal kalitede kaydedilir.
+
+### YouTube
+
+YouTube'un korumalarını çözmek için bir JavaScript çalıştırıcısı (Deno) kurulumla birlikte gelir. Yoksa sistemdeki Deno, Node veya Bun kullanılır; hiçbiri yoksa bazı yüksek çözünürlükler eksik gelebilir (kenar çubuğunda "JS Eksik" uyarısı görünür).
 
 ---
 
@@ -83,7 +94,10 @@ MediaDock, yt-dlp'nin desteklediği her siteden **video ve ses** indirir. Bir si
 2. Önizlemede kalite, biçim ve gerekirse "Premiere Pro için optimize et" seçeneğini ayarlayın.
 3. **İndirmeyi Başlat**'a basın. İlerlemeyi **İndirmeler** sayfasından izleyin, bitince **Klasörde göster** ile dosyaya gidin.
 
-Birden çok bağlantı için **Toplu Bağlantı Ekle**'yi kullanın. Çoklu görsel içeren sayfalarda hangi görsellerin indirileceğini seçebilirsiniz.
+Birden çok bağlantı için **Toplu Bağlantı Ekle**'yi kullanın. Toplu eklenen bir carousel bağlantısı kendiliğinden öğelerine bölünür.
+Çoklu paylaşımlarda **Hepsini İndir** tüm öğeleri sıraya ekler, **Seçerek İndir** hangilerinin indirileceğini seçtirir.
+
+**Hızlı İndirme** (Ayarlar): Açıkken bağlantıyı yapıştırdığınız, sürüklediğiniz ya da panodan kabul ettiğiniz anda içerik algılanır ve varsayılan ayarlarla indirilmeye başlar.
 
 ---
 
@@ -117,8 +131,8 @@ Uygulama açılışta ve Ayarlar sayfasında yeni sürümü kontrol eder, deği�
 
 ## Sorun giderme
 
-**"Instagram gönderisinde indirilebilir video yok" diyor.**
-Gönderi görsel veya çoklu görseldir. yt-dlp Instagram görsellerini desteklemiyor; motoru güncellemek çözmez. Yukarıdaki [Instagram](#instagram) tablosuna bakın.
+**Instagram gönderisi açılmıyor.**
+1.2.0'dan itibaren fotoğraf ve carousel gönderileri de iner. Hata alıyorsanız gönderi özel, kaldırılmış ya da Instagram istekleri geçici olarak sınırlamış olabilir; birkaç dakika sonra tekrar deneyin. Yukarıdaki [Instagram](#instagram) tablosuna bakın.
 
 **"İndirme motoru bu bağlantıyı çözemedi."**
 Site yapısı değişmiş olabilir. **Ayarlar → İndirme Motorları** bölümünden yt-dlp'yi güncelleyip uygulamayı yeniden başlatın. Sürüm zaten günceldir ve sorun sürüyorsa bir süre sonra tekrar deneyin.

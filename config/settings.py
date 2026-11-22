@@ -38,6 +38,7 @@ class AppSettingsData:
     instagram_cookies_opt_in: bool = False
     skipped_update_version: str = ""
     close_to_tray: bool = False
+    auto_download_on_detect: bool = False
 
     def __post_init__(self) -> None:
         if not self.download_dir:

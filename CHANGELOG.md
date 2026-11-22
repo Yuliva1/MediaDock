@@ -2,6 +2,44 @@
 
 Sürüm numarası tek kaynaktan gelir: `config/constants.py` → `APP_VERSION`.
 
+## 1.2.0 — 2026-11-23
+
+Akıllı bağlantı çözücü ve kararlılık sürümü.
+
+### Yeni
+- **Instagram fotoğraf gönderileri ve carousel'ler iniyor** (çerezsiz, tam çözünürlük). yt-dlp
+  "video yok" dediğinde aynı istek `ignore_no_formats_error` ile tekrarlanıp görseller alınıyor.
+- **X fotoğrafları ve karışık (fotoğraf + video) tweet'ler** iniyor; fotoğraflar orijinal kalitede.
+- Galeri öğeleri süresi dolan CDN adresleri yerine `gönderi#mediadock-item=N` olarak saklanıyor; sırada
+  bekleyen ya da yeniden başlatmadan sonra devam eden indirmeler de çalışıyor.
+- Toplu eklenen carousel bağlantıları kendiliğinden öğelerine bölünüyor.
+- Ana sayfa: "2 fotoğraf + 1 video" özeti, **Hepsini İndir** ve **Seçerek İndir**.
+- **Hızlı İndirme** ayarı: yapıştırınca algıla ve hemen indir.
+- **Sistem tepsisine küçültme** ayarı; tepsi menüsü (Aç / Çıkış).
+- Güncelleme penceresinde **Bu Sürümü Atla**.
+- Instagram için ayrı, varsayılan kapalı çerez izni (hikaye / özel hesap için).
+- YouTube için JavaScript çalıştırıcısı (Deno) pakete ekleniyor; yoksa sistemdeki deno/node/bun kullanılıyor.
+
+### Düzeltmeler
+- **Premiere Pro optimizasyonu her seferinde başarısız oluyordu** (var olmayan `convert_for_premiere`
+  çağrılıyordu). Dönüşüm başarısız olursa artık orijinal dosya korunuyor.
+- **Güncelleme ilerleme çubuğu çizilmiyordu** (tema yerine QFrame veriliyordu; her karede hata).
+- "Açılışta güncellemeleri denetle" ayarı hiç okunmuyordu; Ayarlar'a anahtar olarak eklendi.
+- İndirme bittikten sonra "Kapat" güncellemenin kendiliğinden uygulanmasını durdurmuyordu.
+- Kapanışta arka planda iş varken Qt `abort()` (0xc0000409) ile çökme önlendi.
+- Geçmiş sayfası sayfalandı (40 kayıt/sayfa); binlerce kayıtta GDI çökmesi önlendi.
+- "Bitenleri Temizle" başarısız indirmeleri de kaldırıyor.
+- "Klasörde göster" arayüzü dondurmuyor.
+- Güncelleme: dosya karşılaştırması da iptal edilebiliyor; her deneme ayrı geçici klasör; kurulum dosyası
+  `.part` ile indirilip boyutu doğrulanıyor.
+- Kurulum `.mediadock-manifest.json` içeriyor; ilk delta güncellemede eski dosyalar da temizleniyor.
+- Delta güncellemeden sonra Windows "Uygulamalar" listesindeki sürüm güncelleniyor; kaldırma delta ile
+  eklenen dosyaları da siliyor.
+- `crash.log` her oturumun başına sürüm ve saat yazıyor.
+
+### Testler
+- 58 test (önceki 37). Yeni: sahada patlamış hataların regresyon testleri, akıllı çözücü testleri.
+
 ## 1.1.4 — 2026-11-06
 
 - **Canlı Güncelleme Testi:** v1.1.3 üzerinden otomatik güncelleme akışını doğrulamak için yayınlanan test sürümü.

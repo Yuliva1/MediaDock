@@ -326,6 +326,15 @@ class SettingsPage(QWidget):
             self.theme_combo,
         )
 
+        self.quick_dl_toggle = self._make_toggle(False)
+        self.quick_dl_toggle.toggled.connect(lambda v: self._settings.update(auto_download_on_detect=v))
+        system_card.add_row(
+            "Hızlı İndirme",
+            "Bağlantıyı yapıştırdığınızda, sürüklediğinizde ya da panodan kabul ettiğinizde içerik algılanır ve "
+            "varsayılan ayarlarla hemen indirilir (galerilerde tüm öğeler).",
+            self.quick_dl_toggle,
+        )
+
         self.clipboard_toggle = self._make_toggle(True)
         self.clipboard_toggle.toggled.connect(
             lambda v: self._settings.update(clipboard_auto_detect=v)
@@ -519,6 +528,7 @@ class SettingsPage(QWidget):
         self.auto_update_toggle.setChecked(d.auto_check_updates, emit_signal=False)
         self.ig_cookies_toggle.setChecked(d.instagram_cookies_opt_in, emit_signal=False)
         self.tray_toggle.setChecked(d.close_to_tray, emit_signal=False)
+        self.quick_dl_toggle.setChecked(d.auto_download_on_detect, emit_signal=False)
 
         self.ffmpeg_input.setText(d.ffmpeg_custom_path)
         self.refresh_dependency_labels()
